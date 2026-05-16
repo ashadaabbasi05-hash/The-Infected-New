@@ -86,6 +86,11 @@ public sealed class InfectionSystem : MonoBehaviour
         selectedPlayer.SetInfected(true);
         currentInfectedPlayer = selectedPlayer;
         Debug.Log($"InfectionSystem: {selectedPlayer.playerName} was infected.", selectedPlayer);
+
+        if (GameEndManager.Instance != null)
+        {
+            GameEndManager.Instance.CheckLoseConditions();
+        }
     }
 
     void Update()

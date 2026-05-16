@@ -674,6 +674,11 @@ public sealed class MeetingController : MonoBehaviour
         {
             Debug.Log($"{eliminatedName} was NOT Infected.", eliminated);
         }
+
+        if (GameEndManager.Instance != null)
+        {
+            GameEndManager.Instance.CheckLoseConditions();
+        }
     }
 
     PlayerIdentity FindPlayerById(int playerId)
