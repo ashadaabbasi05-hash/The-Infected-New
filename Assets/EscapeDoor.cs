@@ -118,6 +118,7 @@ public sealed class EscapeDoor : MonoBehaviour
             spriteRenderer.color = unlockedColor;
         }
 
+        AgentTracePanel.Trace("OBJECTIVE", "Escape door opened.");
         ObjectiveHUDController.Instance?.HandleEscapeDoorUnlocked();
         Debug.Log("[TASK DEBUG] Escape door unlocked.", this);
     }
@@ -155,6 +156,7 @@ public sealed class EscapeDoor : MonoBehaviour
             gameEndManager.TriggerHumanWin();
         }
 
+        AgentTracePanel.Trace("OBJECTIVE", "Humans escaped.");
         ObjectiveHUDController.Instance?.HandleHumanWinTriggered();
 
         Debug.Log("Humans escaped. You win.", this);

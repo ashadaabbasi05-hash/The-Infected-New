@@ -191,6 +191,8 @@ public sealed class MeetingController : MonoBehaviour
             return;
         }
 
+        AgentTracePanel.Trace("MEETING", "Voting started. Antidote target selection active.");
+
         RefreshAlivePlayers();
 
         flowState = MeetingFlowState.Voting;
@@ -662,6 +664,7 @@ public sealed class MeetingController : MonoBehaviour
         // Log vote for debugging.
         string voterName = string.IsNullOrWhiteSpace(voter.playerName) ? voter.gameObject.name : voter.playerName;
         string targetName = string.IsNullOrWhiteSpace(target.playerName) ? target.gameObject.name : target.playerName;
+        AgentTracePanel.Trace("VOTE", $"{voterName} voted antidote for {targetName}.");
         Debug.Log($"{voterName} voted antidote for {targetName}.", this);
 
         // Disable buttons after local player votes.
@@ -691,6 +694,7 @@ public sealed class MeetingController : MonoBehaviour
         if (votesByTargetPlayerId.Count == 0)
         {
             string noConsensusMsg = "No consensus. No antidote used.";
+            AgentTracePanel.Trace("VOTE", noConsensusMsg);
             Debug.Log(noConsensusMsg, this);
             SetResultText(noConsensusMsg);
             return;
@@ -719,6 +723,7 @@ public sealed class MeetingController : MonoBehaviour
         if (tieCount > 1)
         {
             string tieMsg = "No consensus. No antidote used.";
+            AgentTracePanel.Trace("VOTE", tieMsg);
             Debug.Log(tieMsg, this);
             SetResultText(tieMsg);
             return;
@@ -768,6 +773,7 @@ public sealed class MeetingController : MonoBehaviour
             }
 
             string curedMsg = $"{playerName} was infected and was cured.";
+            AgentTracePanel.Trace("VOTE", $"{target.playerName} was infected and cured by antidote.");
             Debug.Log(curedMsg, target);
             SetResultText(curedMsg);
         }
@@ -775,6 +781,7 @@ public sealed class MeetingController : MonoBehaviour
         {
             // Target is human: no effect, but remain alive and unaffected.
             string humanMsg = $"{playerName} was human. Antidote had no effect.";
+            AgentTracePanel.Trace("VOTE", $"{target.playerName} was human. Antidote had no effect.");
             Debug.Log(humanMsg, target);
             SetResultText(humanMsg);
         }

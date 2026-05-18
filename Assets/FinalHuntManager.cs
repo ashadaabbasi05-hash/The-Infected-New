@@ -136,6 +136,7 @@ public sealed class FinalHuntManager : MonoBehaviour
         }
 
         IsFinalHuntActive = true;
+        AgentTracePanel.Trace("FINAL HUNT", "Final Hunt started: 3 infected vs 1 human.");
         Debug.Log("[FINAL HUNT] STARTED", this);
 
         StopFinalHuntWarningRoutine();
@@ -180,6 +181,7 @@ public sealed class FinalHuntManager : MonoBehaviour
             humanBot.enabled = false;
         }
 
+        AgentTracePanel.Trace("FINAL HUNT", $"Last human: {lastHuman.playerName}");
         Debug.Log($"[FINAL HUNT] Last human is {GetDebugPlayerLabel(lastHuman)}.", lastHuman);
 
         OnFinalHuntStarted?.Invoke();
@@ -264,6 +266,7 @@ public sealed class FinalHuntManager : MonoBehaviour
             botMovement.SetMode(BotBehaviorMode.FinalHunt);
             botMovement.ResumeBot();
 
+            AgentTracePanel.Trace("BOT", $"{GetDebugPlayerLabel(player)} assigned FinalHunt chase behavior.");
             Debug.Log($"[FINAL HUNT] {GetDebugPlayerLabel(player)} set to FinalHunt bot.", player);
         }
     }

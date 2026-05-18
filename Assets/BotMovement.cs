@@ -133,17 +133,22 @@ public sealed class BotMovement : MonoBehaviour
 
     public void SetMode(BotBehaviorMode mode)
     {
+        BotBehaviorMode previousMode = currentMode;
         currentMode = mode;
 
         StopWaitRoutine();
         waiting = false;
         ResetStalkState();
 
-        string playerName = selfIdentity != null && !string.IsNullOrWhiteSpace(selfIdentity.playerName)
-            ? selfIdentity.playerName
-            : gameObject.name;
+        if (previousMode != mode)
+        {
+            string playerName = selfIdentity != null && !string.IsNullOrWhiteSpace(selfIdentity.playerName)
+                ? selfIdentity.playerName
+                : gameObject.name;
 
-        Debug.Log($"[BOT] {playerName} mode changed to {mode}", this);
+            AgentTracePanel.Trace("BOT", $"{playerName} mode changed to {mode}");
+            Debug.Log($"[BOT] {playerName} mode changed to {mode}", this);
+        }
     }
 
     void UpdateFakeTaskMovement(float speed)

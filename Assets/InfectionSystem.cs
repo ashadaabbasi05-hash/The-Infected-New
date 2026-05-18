@@ -171,6 +171,8 @@ public sealed class InfectionSystem : MonoBehaviour
 
     public bool TryInfectRandomHuman(int wave, bool forceIgnoreCoinFlip, string reason)
     {
+        AgentTracePanel.Trace("INFECTION", "Gas wave infection check started.");
+
         PlayerIdentity[] allPlayers = GetAllPlayers();
         int playersFound = allPlayers != null ? allPlayers.Length : 0;
 
@@ -214,6 +216,7 @@ public sealed class InfectionSystem : MonoBehaviour
 
             if (!infectionHappens)
             {
+                AgentTracePanel.Trace("INFECTION", "Wave 1 coin flip skipped infection.");
                 PrintInfectionSummary(wave, null, false, playersFound, aliveHumansBefore, infectedBefore, aliveHumansBefore, infectedBefore);
                 return false;
             }
@@ -418,6 +421,8 @@ public sealed class InfectionSystem : MonoBehaviour
         target.Infect();
         target.RefreshInfectionVisual(useObviousDebugInfectedColor);
 
+        AgentTracePanel.Trace("INFECTION", $"Wave {wave}: {GetPlayerName(target)} infected. Reason: {reason}");
+
         // Ensure the infection flags are set. PlayerIdentity controls the actual fields,
         // so we verify rather than assign directly (private setters).
         if (!target.isInfected || !target.isAIControlled)
@@ -490,6 +495,8 @@ public sealed class InfectionSystem : MonoBehaviour
         botMovement.ResumeBot();
         botMovement.SetMode(mode);
 
+        AgentTracePanel.Trace("BOT", $"{GetPlayerName(target)} converted to AI-controlled bot.");
+        AgentTracePanel.Trace("BOT", $"{GetPlayerName(target)} behavior mode: {mode}");
         Debug.Log($"[INFECT DEBUG] Bot takeover applied to {GetPlayerName(target)}. Mode={mode}", target);
     }
 
@@ -524,6 +531,7 @@ public sealed class InfectionSystem : MonoBehaviour
             botMovement.enabled = true;
             botMovement.SetMode(mode);
             botMovement.ResumeBot();
+            AgentTracePanel.Trace("BOT", $"{GetPlayerName(player)} behavior mode: {mode}");
         }
     }
 

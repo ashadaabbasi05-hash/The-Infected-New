@@ -122,6 +122,7 @@ public sealed class PhysicalInfectionZone : MonoBehaviour
         if (collider != null) touchingColliders.Add(collider);
         lastProgressLogTime = Time.time - progressLogInterval; // allow immediate progress log
 
+        AgentTracePanel.Trace("PHYSICAL", $"{sourceIdentity.playerName} began infecting {currentTarget.playerName}.");
         if (debugLogs) Debug.Log($"[PHYSICAL INFECTION] {sourceIdentity.playerName} started infecting {currentTarget.playerName}. RequiredTime={requiredContactTime:0.00}", this);
     }
 
@@ -173,6 +174,7 @@ public sealed class PhysicalInfectionZone : MonoBehaviour
         {
             if (touchingColliders.Count == 0)
             {
+                AgentTracePanel.Trace("PHYSICAL", $"{currentTarget.playerName} escaped infection contact.");
                 if (debugLogs) Debug.Log($"[PHYSICAL INFECTION] {currentTarget.playerName} escaped infection contact. Timer reset.", this);
                 ResetContact();
             }
@@ -282,6 +284,7 @@ public sealed class PhysicalInfectionZone : MonoBehaviour
             if (debugLogs) Debug.LogWarning($"[PHYSICAL INFECTION] BotMovement missing on infected target {target.playerName}.", this);
         }
 
+        AgentTracePanel.Trace("PHYSICAL", $"{target.playerName} was infected by {sourceIdentity.playerName}.");
         if (debugLogs) Debug.Log($"[PHYSICAL INFECTION] {target.playerName} was infected by {sourceIdentity.playerName}.", this);
 
         // Check lose conditions
