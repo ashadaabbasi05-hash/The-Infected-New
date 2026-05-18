@@ -29,13 +29,39 @@ public sealed class PlayerIdentity : MonoBehaviour
     [field: SerializeField]
     public bool isAIControlled { get; private set; }
 
+    [Header("Visuals")]
+    [Tooltip("If true, the SpriteRenderer's color on Awake becomes the normalColor. Otherwise, normalColor is white.")]
+    [SerializeField] bool useOriginalColorAsNormal = true;
+
+    [Tooltip("Base color used when the player is healthy.")]
+    [SerializeField] Color normalColor = Color.white;
+
+    [Tooltip("Subtle blood-rust tint used while infected. Matches #8B1A1A for stealth gameplay.")]
+    [SerializeField] Color infectedColor = new Color32(139, 26, 26, 255);
+
     PlayerMovement playerMovement;
     SpriteRenderer spriteRenderer;
+    Color originalSpriteColor;
+    bool hasOriginalSpriteColor;
+
+    const string InfectLogPrefix = "[INFECT DEBUG]";
 
     void Awake()
     {
         playerMovement = GetComponent<PlayerMovement>();
         spriteRenderer = GetComponent<SpriteRenderer>();
+
+        // Capture the artist-authored sprite color once so Cure() can restore it.
+        // If useOriginalColorAsNormal is true, the original sprite color becomes the healing target.
+        if (spriteRenderer != null)
+        {
+            originalSpriteColor = spriteRenderer.color;
+            if (useOriginalColorAsNormal)
+            {
+                normalColor = originalSpriteColor;
+            }
+            hasOriginalSpriteColor = true;
+        }
     }
 
     void OnValidate()
@@ -48,34 +74,35 @@ public sealed class PlayerIdentity : MonoBehaviour
 
     public void Infect()
     {
-        SetInfected(true);
+        isInfected = true;
+        isAIControlled = true;
+
+        ApplyControlState();
+        ApplyInfectionVisual(true);
+
+        Debug.Log($"{InfectLogPrefix} INFECTED: {GetDisplayName()}", this);
     }
 
     public void Cure()
     {
-        SetInfected(false);
+        isInfected = false;
+        isAIControlled = false;
+
+        ApplyControlState();
+        ApplyInfectionVisual(false);
+
+        Debug.Log($"{InfectLogPrefix} CURED: {GetDisplayName()}", this);
     }
 
     public void SetInfected(bool value)
     {
-        if (isInfected == value)
-        {
-            if (value)
-            {
-                ApplyInfectionVisual(true);
-            }
-
-            return;
-        }
-
-        isInfected = value;
-        isAIControlled = value;
-
-        ApplyInfectionVisual(value);
-
         if (value)
         {
-            LogInfection($"{GetDisplayName().ToUpperInvariant()} HAS BEEN INFECTED");
+            Infect();
+        }
+        else
+        {
+            Cure();
         }
     }
 
@@ -87,19 +114,20 @@ public sealed class PlayerIdentity : MonoBehaviour
         }
 
         isAlive = false;
-        SetMovementEnabled(false);
+        ApplyControlState();
     }
 
     public void RevivePlayer()
     {
         if (isAlive)
         {
-            SetMovementEnabled(true);
+            ApplyControlState();
             return;
         }
 
         isAlive = true;
-        SetMovementEnabled(true);
+        ApplyControlState();
+        ApplyInfectionVisual(isInfected);
     }
 
     public static PlayerIdentity[] GetAllPlayers()
@@ -121,26 +149,58 @@ public sealed class PlayerIdentity : MonoBehaviour
         }
     }
 
+    void SetBotMovementEnabled(bool enabled)
+    {
+        MonoBehaviour[] behaviours = GetComponents<MonoBehaviour>();
+        for (int i = 0; i < behaviours.Length; i++)
+        {
+            MonoBehaviour behaviour = behaviours[i];
+            if (behaviour != null && behaviour.GetType().Name == "BotMovement")
+            {
+                behaviour.enabled = enabled;
+            }
+        }
+    }
+
+    void ApplyControlState()
+    {
+        SetMovementEnabled(isAlive && isLocalPlayer && !isAIControlled);
+        SetBotMovementEnabled(isAlive && isAIControlled);
+    }
+
     string GetDisplayName()
     {
         return string.IsNullOrWhiteSpace(playerName) ? gameObject.name : playerName;
     }
 
-    void ApplyInfectionVisual(bool infected)
+    public void RefreshInfectionVisual(bool useObviousDebugColor = false)
+    {
+        ApplyInfectionVisual(isInfected, useObviousDebugColor);
+    }
+
+    void ApplyInfectionVisual(bool infected, bool useObviousDebugColor = false)
     {
         if (spriteRenderer == null)
         {
             spriteRenderer = GetComponent<SpriteRenderer>();
         }
 
-        if (spriteRenderer != null)
+        // No renderer means nothing to color; skip safely.
+        if (spriteRenderer == null)
         {
-            spriteRenderer.color = infected ? Color.red : Color.white;
+            return;
         }
-    }
 
-    void LogInfection(string message)
-    {
-        Debug.Log($"<color=red>{message}</color>", this);
+        if (!hasOriginalSpriteColor)
+        {
+            originalSpriteColor = spriteRenderer.color;
+            normalColor = originalSpriteColor;
+            hasOriginalSpriteColor = true;
+        }
+
+        // Use a subtle rust tint for infection; restore original tone when cured.
+        spriteRenderer.color = infected
+            ? (useObviousDebugColor ? Color.red : infectedColor)
+            : originalSpriteColor;
     }
 }

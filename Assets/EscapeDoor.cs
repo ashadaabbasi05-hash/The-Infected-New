@@ -16,6 +16,7 @@ public sealed class EscapeDoor : MonoBehaviour
 
     bool isUnlocked;
     SpriteRenderer spriteRenderer;
+    TaskManager subscribedTaskManager;
 
     void Awake()
     {
@@ -43,9 +44,10 @@ public sealed class EscapeDoor : MonoBehaviour
 
     void OnDisable()
     {
-        if (TaskManager.Instance != null)
+        if (subscribedTaskManager != null)
         {
-            TaskManager.Instance.OnAllTasksCompleted -= HandleAllTasksCompleted;
+            subscribedTaskManager.OnAllTasksCompleted -= HandleAllTasksCompleted;
+            subscribedTaskManager = null;
         }
     }
 
@@ -68,23 +70,35 @@ public sealed class EscapeDoor : MonoBehaviour
 
     void TrySubscribeToTaskManager()
     {
-        if (TaskManager.Instance == null)
+        TaskManager taskManager = TaskManager.Instance != null ? TaskManager.Instance : FindAnyObjectByType<TaskManager>(FindObjectsInactive.Include);
+        if (taskManager == null)
         {
             return;
         }
 
-        TaskManager.Instance.OnAllTasksCompleted -= HandleAllTasksCompleted;
-        TaskManager.Instance.OnAllTasksCompleted += HandleAllTasksCompleted;
+        if (subscribedTaskManager == taskManager)
+        {
+            return;
+        }
+
+        if (subscribedTaskManager != null)
+        {
+            subscribedTaskManager.OnAllTasksCompleted -= HandleAllTasksCompleted;
+        }
+
+        subscribedTaskManager = taskManager;
+        subscribedTaskManager.OnAllTasksCompleted -= HandleAllTasksCompleted;
+        subscribedTaskManager.OnAllTasksCompleted += HandleAllTasksCompleted;
     }
 
     void TryUnlockFromCurrentProgress()
     {
-        if (TaskManager.Instance == null)
+        if (subscribedTaskManager == null)
         {
             return;
         }
 
-        if (TaskManager.Instance.totalTasks > 0 && TaskManager.Instance.completedTasks >= TaskManager.Instance.totalTasks)
+        if (subscribedTaskManager.totalTasks > 0 && subscribedTaskManager.completedTasks >= subscribedTaskManager.totalTasks)
         {
             HandleAllTasksCompleted();
         }
@@ -104,20 +118,27 @@ public sealed class EscapeDoor : MonoBehaviour
             spriteRenderer.color = unlockedColor;
         }
 
-        Debug.Log("Escape door unlocked.", this);
+        ObjectiveHUDController.Instance?.HandleEscapeDoorUnlocked();
+        Debug.Log("[TASK DEBUG] Escape door unlocked.", this);
     }
 
     void OnTriggerEnter2D(Collider2D other)
     {
-        PlayerIdentity identity = other.GetComponent<PlayerIdentity>();
+        PlayerIdentity identity = other != null ? other.GetComponentInParent<PlayerIdentity>() : null;
         if (identity == null || !identity.isLocalPlayer || !identity.isAlive)
+        {
+            return;
+        }
+
+        if (identity.isInfected || identity.isAIControlled)
         {
             return;
         }
 
         if (!isUnlocked)
         {
-            Debug.Log("Door locked. Complete all tasks.", this);
+            Debug.Log("[TASK DEBUG] Door locked. Complete all tasks.", this);
+            ObjectiveHUDController.Instance?.RefreshObjectiveText();
             return;
         }
 
@@ -133,6 +154,8 @@ public sealed class EscapeDoor : MonoBehaviour
         {
             gameEndManager.TriggerHumanWin();
         }
+
+        ObjectiveHUDController.Instance?.HandleHumanWinTriggered();
 
         Debug.Log("Humans escaped. You win.", this);
     }

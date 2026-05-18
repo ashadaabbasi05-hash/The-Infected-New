@@ -1,14 +1,22 @@
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 
 public sealed class InfectionSystem : MonoBehaviour
 {
+    public static InfectionSystem Instance { get; private set; }
+
     [SerializeField, Min(0f)]
     float safePhaseDuration = 10f;
 
     [SerializeField, Min(0f)]
     float gasWaveDuration = 5f;
+
+    [SerializeField, Min(0f)]
+    float antidoteFreezeDuration = 10f;
+
+    public float AntidoteFreezeDuration => antidoteFreezeDuration;
 
     [SerializeField]
     AudioSource alarmSource;
@@ -31,70 +39,91 @@ public sealed class InfectionSystem : MonoBehaviour
     [SerializeField, Min(0f)]
     float overlayFadeSpeed = 1.5f;
 
+    [SerializeField]
+    bool enableDebugHotkeys = true;
+
+    [SerializeField]
+    bool useObviousDebugInfectedColor = false;
+
     float timer;
-
     bool isGasWaveActive;
-
     PlayerIdentity currentInfectedPlayer;
-
+    int gasWaveCount;
+    int lastWaveInfectionAttempted = -1;
+    bool isSubscribedToGameManagerEvents;
     float ambientSafeVolume = 1f;
+
+    readonly Dictionary<PlayerIdentity, Coroutine> frozenPlayers = new Dictionary<PlayerIdentity, Coroutine>();
+
+    void Awake()
+    {
+        if (Instance != null && Instance != this)
+        {
+            Destroy(gameObject);
+            return;
+        }
+
+        Instance = this;
+    }
+
+    void OnDestroy()
+    {
+        if (Instance == this)
+        {
+            Instance = null;
+        }
+    }
+
+    void OnEnable()
+    {
+        TrySubscribeToGameManagerEvents();
+    }
 
     void Start()
     {
         InitializePresentation();
-        StartSafePhase(true);
+        TrySubscribeToGameManagerEvents();
+
+        if (GameManager.Instance != null)
+        {
+            SyncToGameManagerState();
+        }
+        else
+        {
+            StartSafePhase(true);
+        }
     }
 
-    public void InfectRandomPlayer()
+    void OnDisable()
     {
-        PlayerIdentity[] allPlayers = FindObjectsByType<PlayerIdentity>(FindObjectsInactive.Include);
+        TryUnsubscribeFromGameManagerEvents();
 
-        if (allPlayers == null || allPlayers.Length == 0)
+        foreach (Coroutine runningCoroutine in frozenPlayers.Values)
         {
-            return;
-        }
-
-        ClearExistingInfections(allPlayers);
-
-        List<PlayerIdentity> eligiblePlayers = new List<PlayerIdentity>();
-
-        for (int index = 0; index < allPlayers.Length; index++)
-        {
-            PlayerIdentity player = allPlayers[index];
-
-            if (player == null)
+            if (runningCoroutine != null)
             {
-                continue;
+                StopCoroutine(runningCoroutine);
             }
-
-            if (!player.isAlive || player.isInfected)
-            {
-                continue;
-            }
-
-            eligiblePlayers.Add(player);
         }
 
-        if (eligiblePlayers.Count == 0)
-        {
-            return;
-        }
-
-        int selectedIndex = Random.Range(0, eligiblePlayers.Count);
-        PlayerIdentity selectedPlayer = eligiblePlayers[selectedIndex];
-
-        selectedPlayer.SetInfected(true);
-        currentInfectedPlayer = selectedPlayer;
-        Debug.Log($"InfectionSystem: {selectedPlayer.playerName} was infected.", selectedPlayer);
-
-        if (GameEndManager.Instance != null)
-        {
-            GameEndManager.Instance.CheckLoseConditions();
-        }
+        frozenPlayers.Clear();
     }
 
     void Update()
     {
+        TrySubscribeToGameManagerEvents();
+
+        if (enableDebugHotkeys)
+        {
+            HandleDebugHotkeys();
+        }
+
+        if (GameManager.Instance != null)
+        {
+            UpdateGasOverlay();
+            return;
+        }
+
         if (timer > 0f)
         {
             timer -= Time.deltaTime;
@@ -115,13 +144,463 @@ public sealed class InfectionSystem : MonoBehaviour
         UpdateGasOverlay();
     }
 
+    public void OnGasWaveStarted(int wave)
+    {
+        Debug.Log($"[INFECT DEBUG] Gas wave start received. Wave={wave}", this);
+
+        isGasWaveActive = true;
+        ApplyGasWaveAudio();
+
+        if (wave == lastWaveInfectionAttempted)
+        {
+            Debug.Log($"[INFECT DEBUG] Infection already attempted for wave {wave}. Skipping duplicate.", this);
+            return;
+        }
+
+        lastWaveInfectionAttempted = wave;
+
+        bool success = TryInfectRandomHuman(wave, false, "GAS_WAVE");
+        Debug.Log($"[INFECT DEBUG] Infection attempt completed. Success={success}", this);
+    }
+
+    public void InfectRandomPlayer()
+    {
+        int wave = GameManager.Instance != null ? GameManager.CurrentWave : gasWaveCount;
+        TryInfectRandomHuman(wave, true, "DEBUG_FORCE_RANDOM");
+    }
+
+    public bool TryInfectRandomHuman(int wave, bool forceIgnoreCoinFlip, string reason)
+    {
+        PlayerIdentity[] allPlayers = GetAllPlayers();
+        int playersFound = allPlayers != null ? allPlayers.Length : 0;
+
+        CollectInfectionStats(allPlayers, out int aliveHumansBefore, out int infectedBefore, out _);
+
+        List<PlayerIdentity> eligiblePlayers = new List<PlayerIdentity>();
+
+        if (allPlayers != null)
+        {
+            for (int index = 0; index < allPlayers.Length; index++)
+            {
+                PlayerIdentity player = allPlayers[index];
+
+                if (player == null)
+                {
+                    continue;
+                }
+
+                if (!player.isAlive || player.isInfected)
+                {
+                    continue;
+                }
+
+                eligiblePlayers.Add(player);
+            }
+        }
+
+        if (eligiblePlayers.Count == 0)
+        {
+            Debug.Log("[INFECT DEBUG] No valid human candidates available.", this);
+            PrintInfectionSummary(wave, null, false, playersFound, aliveHumansBefore, infectedBefore, aliveHumansBefore, infectedBefore);
+            return false;
+        }
+
+        if (wave == 1 && !forceIgnoreCoinFlip)
+        {
+            bool infectionHappens = UnityEngine.Random.Range(0, 2) == 1;
+            Debug.Log(infectionHappens
+                ? "[INFECT DEBUG] Wave 1 coin flip result: infection happens."
+                : "[INFECT DEBUG] Wave 1 coin flip result: infection skipped.", this);
+
+            if (!infectionHappens)
+            {
+                PrintInfectionSummary(wave, null, false, playersFound, aliveHumansBefore, infectedBefore, aliveHumansBefore, infectedBefore);
+                return false;
+            }
+        }
+
+        int selectedIndex = UnityEngine.Random.Range(0, eligiblePlayers.Count);
+        PlayerIdentity selectedPlayer = eligiblePlayers[selectedIndex];
+
+        ApplyInfection(selectedPlayer, wave, reason);
+
+        CollectInfectionStats(allPlayers, out int aliveHumansAfter, out int infectedAfter, out _);
+        PrintInfectionSummary(wave, selectedPlayer, true, playersFound, aliveHumansBefore, infectedBefore, aliveHumansAfter, infectedAfter);
+        return true;
+    }
+
+    public bool TryInfectPlayerById(int playerId, int wave, string reason)
+    {
+        PlayerIdentity[] allPlayers = GetAllPlayers();
+        int playersFound = allPlayers != null ? allPlayers.Length : 0;
+
+        CollectInfectionStats(allPlayers, out int aliveHumansBefore, out int infectedBefore, out _);
+
+        PlayerIdentity target = FindPlayerById(allPlayers, playerId);
+        if (target == null)
+        {
+            Debug.Log($"[INFECT DEBUG] PlayerId={playerId} not found.", this);
+            PrintInfectionSummary(wave, null, false, playersFound, aliveHumansBefore, infectedBefore, aliveHumansBefore, infectedBefore);
+            return false;
+        }
+
+        if (!target.isAlive || target.isInfected)
+        {
+            Debug.Log($"[INFECT DEBUG] PlayerId={playerId} is not a valid infection target. Alive={target.isAlive} Infected={target.isInfected}", target);
+            PrintInfectionSummary(wave, target, false, playersFound, aliveHumansBefore, infectedBefore, aliveHumansBefore, infectedBefore);
+            return false;
+        }
+
+        ApplyInfection(target, wave, reason);
+
+        CollectInfectionStats(allPlayers, out int aliveHumansAfter, out int infectedAfter, out _);
+        PrintInfectionSummary(wave, target, true, playersFound, aliveHumansBefore, infectedBefore, aliveHumansAfter, infectedAfter);
+        return true;
+    }
+
+    public void DebugPrintAllPlayers()
+    {
+        PlayerIdentity[] allPlayers = GetAllPlayers();
+        int totalPlayersFound = allPlayers != null ? allPlayers.Length : 0;
+        CollectInfectionStats(allPlayers, out int aliveHumans, out int infectedCount, out int validHumanCandidatesCount);
+
+        Debug.Log($"[INFECT DEBUG] total players found={totalPlayersFound}", this);
+        Debug.Log($"[INFECT DEBUG] valid human infection candidates count={validHumanCandidatesCount}", this);
+        Debug.Log($"[INFECT DEBUG] infected count={infectedCount}", this);
+        Debug.Log($"[INFECT DEBUG] alive human count={aliveHumans}", this);
+
+        if (allPlayers == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < allPlayers.Length; i++)
+        {
+            PlayerIdentity player = allPlayers[i];
+            if (player == null)
+            {
+                continue;
+            }
+
+            bool hasSprite = player.GetComponent<SpriteRenderer>() != null;
+            bool hasPlayerMovement = player.GetComponent<PlayerMovement>() != null;
+            bool hasBotMovement = HasBotMovement(player);
+
+            Debug.Log($"[INFECT DEBUG] PlayerId={player.playerId} Name={GetPlayerName(player)} Alive={player.isAlive} Infected={player.isInfected} AI={player.isAIControlled} Local={player.isLocalPlayer} HasSprite={hasSprite} HasPlayerMovement={hasPlayerMovement} HasBotMovement={hasBotMovement}", player);
+        }
+    }
+
+    public void ApplyAntidote(PlayerIdentity target)
+    {
+        if (target == null)
+        {
+            return;
+        }
+
+        if (!target.isAlive)
+        {
+            Debug.Log($"[INFECT DEBUG] Antidote target {GetPlayerName(target)} is dead. No effect.", target);
+            return;
+        }
+
+        string playerName = GetPlayerName(target);
+
+        if (!target.isInfected)
+        {
+            Debug.Log($"[INFECT DEBUG] {playerName} was human. Antidote had no effect.", target);
+            return;
+        }
+
+        if (target == currentInfectedPlayer)
+        {
+            currentInfectedPlayer = null;
+        }
+
+        target.Cure();
+        target.RefreshInfectionVisual(useObviousDebugInfectedColor);
+
+        DisableBotMovement(target);
+        SetPlayerMovementEnabled(target, false);
+
+        if (frozenPlayers.TryGetValue(target, out Coroutine runningCoroutine) && runningCoroutine != null)
+        {
+            StopCoroutine(runningCoroutine);
+        }
+
+        frozenPlayers[target] = StartCoroutine(FreezeMovementAfterAntidote(target));
+    }
+
+    void HandleDebugHotkeys()
+    {
+        if (Input.GetKeyDown(KeyCode.P))
+        {
+            DebugPrintAllPlayers();
+        }
+
+        if (Input.GetKeyDown(KeyCode.I))
+        {
+            int wave = GameManager.Instance != null ? GameManager.CurrentWave : GetDebugWaveNumber();
+            TryInfectRandomHuman(wave, true, "DEBUG_FORCE_RANDOM");
+        }
+
+        if (Input.GetKeyDown(KeyCode.Alpha1))
+        {
+            TryInfectPlayerById(1, GetDebugWaveNumber(), "DEBUG_FORCE_PLAYER_1");
+        }
+
+        if (Input.GetKeyDown(KeyCode.Alpha2))
+        {
+            TryInfectPlayerById(2, GetDebugWaveNumber(), "DEBUG_FORCE_PLAYER_2");
+        }
+
+        if (Input.GetKeyDown(KeyCode.Alpha3))
+        {
+            TryInfectPlayerById(3, GetDebugWaveNumber(), "DEBUG_FORCE_PLAYER_3");
+        }
+
+        if (Input.GetKeyDown(KeyCode.Alpha4))
+        {
+            TryInfectPlayerById(4, GetDebugWaveNumber(), "DEBUG_FORCE_PLAYER_4");
+        }
+
+        if (Input.GetKeyDown(KeyCode.C))
+        {
+            Debug.Log("[INFECT DEBUG] Debug hotkey C pressed. Curing infected players only. This is debug only.", this);
+            CureAllInfectedPlayers();
+        }
+    }
+
+    void CureAllInfectedPlayers()
+    {
+        PlayerIdentity[] allPlayers = GetAllPlayers();
+        if (allPlayers == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < allPlayers.Length; i++)
+        {
+            PlayerIdentity player = allPlayers[i];
+            if (player == null || !player.isInfected)
+            {
+                continue;
+            }
+
+            player.Cure();
+        }
+
+        if (GameEndManager.Instance != null)
+        {
+            GameEndManager.Instance.CheckLoseConditions();
+        }
+    }
+
+    void ApplyInfection(PlayerIdentity target, int wave, string reason)
+    {
+        if (target == null)
+        {
+            Debug.Log("[INFECT DEBUG] ApplyInfection received a null target.", this);
+            return;
+        }
+
+        if (!target.isAlive)
+        {
+            Debug.Log($"[INFECT DEBUG] Cannot infect {GetPlayerName(target)} because the player is dead.", target);
+            return;
+        }
+
+        if (target.isInfected)
+        {
+            Debug.Log($"[INFECT DEBUG] {GetPlayerName(target)} is already infected.", target);
+            return;
+        }
+        // Primary infection call - this should set isInfected and isAIControlled.
+        target.Infect();
+        target.RefreshInfectionVisual(useObviousDebugInfectedColor);
+
+        // Ensure the infection flags are set. PlayerIdentity controls the actual fields,
+        // so we verify rather than assign directly (private setters).
+        if (!target.isInfected || !target.isAIControlled)
+        {
+            Debug.LogWarning($"[INFECT DEBUG] Infection flags not set by Infect() for {GetPlayerName(target)}. Re-invoking Infect().", target);
+            target.Infect();
+            target.RefreshInfectionVisual(useObviousDebugInfectedColor);
+        }
+
+        ApplyBotTakeover(target, wave);
+        UpdateAllBotModesForWave(wave);
+
+        currentInfectedPlayer = target;
+
+        Debug.Log($"[INFECT DEBUG] INFECTED: {GetPlayerName(target)} on wave {wave}. Reason: {reason}", target);
+
+        // Final verification log for takeover state.
+        PlayerMovement movement = target.GetComponent<PlayerMovement>();
+        BotMovement botMovement = target.GetComponent<BotMovement>();
+        bool playerMovementEnabled = movement != null && movement.enabled;
+        bool botMovementEnabled = botMovement != null && botMovement.enabled;
+        string botModeName = botMovement != null ? botMovement.CurrentMode.ToString() : "NONE";
+        Debug.Log($"[INFECT DEBUG] TAKEOVER RESULT: {GetPlayerName(target)} infected={target.isInfected} ai={target.isAIControlled} botMode={botModeName} playerMovementEnabled={playerMovementEnabled} botMovementEnabled={botMovementEnabled}", target);
+
+        if (GameEndManager.Instance != null)
+        {
+            GameEndManager.Instance.CheckLoseConditions();
+        }
+    }
+
+    BotBehaviorMode GetBotModeForWave(int wave)
+    {
+        if (wave <= 1)
+        {
+            return BotBehaviorMode.FakeTask;
+        }
+
+        if (wave == 2)
+        {
+            return BotBehaviorMode.Stalk;
+        }
+
+        return BotBehaviorMode.AggressiveChase;
+    }
+
+    void ApplyBotTakeover(PlayerIdentity target, int wave)
+    {
+        if (target == null)
+        {
+            return;
+        }
+
+        // Human input must be disabled when infection takeover starts.
+        PlayerMovement movement = target.GetComponent<PlayerMovement>();
+        if (movement != null)
+        {
+            movement.enabled = false;
+            Debug.Log($"[INFECT DEBUG] Disabled PlayerMovement on {GetPlayerName(target)}", target);
+        }
+
+        BotMovement botMovement = target.GetComponent<BotMovement>();
+        if (botMovement == null)
+        {
+            Debug.LogWarning($"[INFECT DEBUG] BotMovement missing on {GetPlayerName(target)}. Cannot move as bot.", target);
+            return;
+        }
+
+        BotBehaviorMode mode = GetBotModeForWave(wave);
+        botMovement.enabled = true;
+        botMovement.ResumeBot();
+        botMovement.SetMode(mode);
+
+        Debug.Log($"[INFECT DEBUG] Bot takeover applied to {GetPlayerName(target)}. Mode={mode}", target);
+    }
+
+    void UpdateAllBotModesForWave(int wave)
+    {
+        BotBehaviorMode mode = GetBotModeForWave(wave);
+        PlayerIdentity[] allPlayers = GetAllPlayers();
+        if (allPlayers == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < allPlayers.Length; i++)
+        {
+            PlayerIdentity player = allPlayers[i];
+            if (player == null)
+            {
+                continue;
+            }
+
+            if (!player.isInfected || !player.isAIControlled)
+            {
+                continue;
+            }
+
+            BotMovement botMovement = player.GetComponent<BotMovement>();
+            if (botMovement == null)
+            {
+                continue;
+            }
+
+            botMovement.enabled = true;
+            botMovement.SetMode(mode);
+            botMovement.ResumeBot();
+        }
+    }
+
+    void SyncToGameManagerState()
+    {
+        if (GameManager.Instance == null)
+        {
+            return;
+        }
+
+        if (GameManager.CurrentPhase == GamePhase.GasWave)
+        {
+            OnGasWaveStarted(GameManager.CurrentWave);
+        }
+        else
+        {
+            isGasWaveActive = false;
+            ApplySafePhaseAudio();
+            UpdateGasOverlay();
+        }
+    }
+
+    void TrySubscribeToGameManagerEvents()
+    {
+        GameManager gameManager = GameManager.Instance;
+        if (gameManager == null || isSubscribedToGameManagerEvents)
+        {
+            return;
+        }
+
+        gameManager.OnGasWaveStarted -= HandleGasWaveStarted;
+        gameManager.OnGasWaveStarted += HandleGasWaveStarted;
+
+        gameManager.OnGasWaveEnded -= HandleGasWaveEnded;
+        gameManager.OnGasWaveEnded += HandleGasWaveEnded;
+
+        gameManager.OnExplorationStarted -= HandleExplorationStarted;
+        gameManager.OnExplorationStarted += HandleExplorationStarted;
+
+        isSubscribedToGameManagerEvents = true;
+    }
+
+    void TryUnsubscribeFromGameManagerEvents()
+    {
+        GameManager gameManager = GameManager.Instance;
+        if (gameManager == null || !isSubscribedToGameManagerEvents)
+        {
+            return;
+        }
+
+        gameManager.OnGasWaveStarted -= HandleGasWaveStarted;
+        gameManager.OnGasWaveEnded -= HandleGasWaveEnded;
+        gameManager.OnExplorationStarted -= HandleExplorationStarted;
+
+        isSubscribedToGameManagerEvents = false;
+    }
+
+    void HandleGasWaveStarted()
+    {
+        int wave = GameManager.Instance != null ? GameManager.CurrentWave : gasWaveCount + 1;
+        OnGasWaveStarted(wave);
+    }
+
+    void HandleGasWaveEnded()
+    {
+        StartSafePhase();
+    }
+
+    void HandleExplorationStarted()
+    {
+        StartSafePhase();
+    }
+
     void StartSafePhase(bool isInitialStart = false)
     {
         isGasWaveActive = false;
         timer = safePhaseDuration;
-
-        ClearExistingInfections(PlayerIdentity.GetAllPlayers());
-        currentInfectedPlayer = null;
 
         ApplySafePhaseAudio();
 
@@ -135,9 +614,14 @@ public sealed class InfectionSystem : MonoBehaviour
     {
         isGasWaveActive = true;
         timer = gasWaveDuration;
+        gasWaveCount++;
 
         ApplyGasWaveAudio();
-        InfectRandomPlayer();
+
+        if (GameManager.Instance == null)
+        {
+            OnGasWaveStarted(gasWaveCount);
+        }
     }
 
     void InitializePresentation()
@@ -243,24 +727,193 @@ public sealed class InfectionSystem : MonoBehaviour
         gasOverlay.color = overlayColor;
     }
 
-    void ClearExistingInfections(PlayerIdentity[] allPlayers)
+    IEnumerator FreezeMovementAfterAntidote(PlayerIdentity target)
     {
-        for (int index = 0; index < allPlayers.Length; index++)
+        if (target == null)
         {
-            PlayerIdentity player = allPlayers[index];
+            yield break;
+        }
 
-            if (player == null || !player.isInfected)
+        yield return new WaitForSeconds(antidoteFreezeDuration);
+
+        frozenPlayers.Remove(target);
+
+        if (target == null || !target.isAlive)
+        {
+            yield break;
+        }
+
+        SetPlayerMovementEnabled(target, !target.isAIControlled);
+    }
+
+    void CollectInfectionStats(PlayerIdentity[] allPlayers, out int aliveHumans, out int infectedCount, out int validHumanCandidatesCount)
+    {
+        aliveHumans = 0;
+        infectedCount = 0;
+        validHumanCandidatesCount = 0;
+
+        if (allPlayers == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < allPlayers.Length; i++)
+        {
+            PlayerIdentity player = allPlayers[i];
+            if (player == null)
             {
                 continue;
             }
 
-            player.SetInfected(false);
-
-            if (player == currentInfectedPlayer)
+            if (player.isInfected)
             {
-                currentInfectedPlayer = null;
+                infectedCount++;
+            }
+
+            if (!player.isAlive)
+            {
+                continue;
+            }
+
+            if (!player.isInfected)
+            {
+                aliveHumans++;
+                validHumanCandidatesCount++;
             }
         }
     }
 
+    void PrintInfectionSummary(int wave, PlayerIdentity target, bool success, int playersFound, int aliveHumansBefore, int infectedBefore, int aliveHumansAfter, int infectedAfter)
+    {
+        string chosenTarget = target != null ? GetPlayerName(target) : "NONE";
+        Debug.Log($"[INFECT DEBUG] SUMMARY:\nWave: {wave}\nPlayers found: {playersFound}\nAlive humans before: {aliveHumansBefore}\nInfected before: {infectedBefore}\nChosen target: {chosenTarget}\nSuccess: {success}\nAlive humans after: {aliveHumansAfter}\nInfected after: {infectedAfter}", this);
+    }
+
+    PlayerIdentity[] GetAllPlayers()
+    {
+        return PlayerIdentity.GetAllPlayers();
+    }
+
+    PlayerIdentity FindPlayerById(PlayerIdentity[] allPlayers, int playerId)
+    {
+        if (allPlayers == null)
+        {
+            return null;
+        }
+
+        for (int i = 0; i < allPlayers.Length; i++)
+        {
+            PlayerIdentity player = allPlayers[i];
+            if (player != null && player.playerId == playerId)
+            {
+                return player;
+            }
+        }
+
+        return null;
+    }
+
+    string GetPlayerName(PlayerIdentity player)
+    {
+        if (player == null)
+        {
+            return "NONE";
+        }
+
+        return string.IsNullOrWhiteSpace(player.playerName) ? player.gameObject.name : player.playerName;
+    }
+
+    bool HasBotMovement(PlayerIdentity player)
+    {
+        if (player == null)
+        {
+            return false;
+        }
+
+        MonoBehaviour[] behaviours = player.GetComponents<MonoBehaviour>();
+        for (int i = 0; i < behaviours.Length; i++)
+        {
+            MonoBehaviour behaviour = behaviours[i];
+            if (behaviour != null && behaviour.GetType().Name == "BotMovement")
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    void DisableBotMovement(PlayerIdentity target)
+    {
+        if (target == null)
+        {
+            return;
+        }
+
+        MonoBehaviour[] behaviours = target.GetComponents<MonoBehaviour>();
+        for (int i = 0; i < behaviours.Length; i++)
+        {
+            MonoBehaviour behaviour = behaviours[i];
+            if (behaviour != null && behaviour.GetType().Name == "BotMovement")
+            {
+                behaviour.enabled = false;
+            }
+        }
+    }
+
+    void EnableBotMovement(PlayerIdentity target)
+    {
+        if (target == null)
+        {
+            return;
+        }
+
+        MonoBehaviour[] behaviours = target.GetComponents<MonoBehaviour>();
+        for (int i = 0; i < behaviours.Length; i++)
+        {
+            MonoBehaviour behaviour = behaviours[i];
+            if (behaviour != null && behaviour.GetType().Name == "BotMovement")
+            {
+                behaviour.enabled = true;
+            }
+        }
+    }
+
+    void DisablePlayerMovement(PlayerIdentity target)
+    {
+        if (target == null)
+        {
+            return;
+        }
+
+        PlayerMovement movement = target.GetComponent<PlayerMovement>();
+        if (movement != null)
+        {
+            movement.enabled = false;
+        }
+    }
+
+    void SetPlayerMovementEnabled(PlayerIdentity target, bool enabled)
+    {
+        if (target == null)
+        {
+            return;
+        }
+
+        PlayerMovement movement = target.GetComponent<PlayerMovement>();
+        if (movement != null)
+        {
+            movement.enabled = enabled;
+        }
+    }
+
+    int GetDebugWaveNumber()
+    {
+        if (GameManager.Instance != null)
+        {
+            return GameManager.CurrentWave;
+        }
+
+        return Mathf.Max(1, gasWaveCount);
+    }
 }

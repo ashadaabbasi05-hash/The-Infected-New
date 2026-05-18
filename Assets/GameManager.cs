@@ -201,6 +201,16 @@ public sealed class GameManager : MonoBehaviour
         SetPhaseInternal(GamePhase.Voting);
     }
 
+    public void AddPhaseTime(float seconds)
+    {
+        if (seconds <= 0f)
+        {
+            return;
+        }
+
+        phaseTimer += seconds;
+    }
+
     public void ForceReset()
     {
         currentWave = 0;

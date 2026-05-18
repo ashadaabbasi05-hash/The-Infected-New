@@ -12,6 +12,9 @@ public sealed class TaskManager : MonoBehaviour
     public int totalTasks => registeredTasks.Count;
     public int completedTasks => completedTaskSet.Count;
     public float taskProgress => totalTasks <= 0 ? 0f : (float)completedTasks / totalTasks;
+    public int TotalTasks => totalTasks;
+    public int CompletedTasks => completedTasks;
+    public int RemainingTasks => Mathf.Max(0, totalTasks - completedTasks);
 
     public event Action OnAllTasksCompleted;
     public event Action<float, int, int> OnTaskProgressChanged;
@@ -20,10 +23,18 @@ public sealed class TaskManager : MonoBehaviour
     [SerializeField] Slider progressBar;
     [SerializeField] TMP_Text progressText;
 
+    [Header("Debug")]
+    [SerializeField] bool enableTaskDebugHotkeys = true;
+    [SerializeField] bool allowDebugResetTasks;
+
     readonly HashSet<TaskInteractable> registeredTasks = new HashSet<TaskInteractable>();
     readonly HashSet<TaskInteractable> completedTaskSet = new HashSet<TaskInteractable>();
 
     bool hasRaisedAllTasksCompleted;
+    bool hasWarnedNoTasks;
+    float lastProgressValue = -1f;
+    int lastLoggedCompleted = -1;
+    int lastLoggedTotal = -1;
 
     void Awake()
     {
@@ -34,7 +45,13 @@ public sealed class TaskManager : MonoBehaviour
         }
 
         Instance = this;
+        Debug.Log("[TASK DEBUG] TaskManager started.", this);
         RefreshUi();
+    }
+
+    void Start()
+    {
+        RefreshProgressAndEvents(false);
     }
 
     void OnDestroy()
@@ -43,6 +60,11 @@ public sealed class TaskManager : MonoBehaviour
         {
             Instance = null;
         }
+    }
+
+    void Update()
+    {
+        HandleDebugHotkeys();
     }
 
     public void RegisterTask(TaskInteractable task)
@@ -54,6 +76,11 @@ public sealed class TaskManager : MonoBehaviour
 
         if (!registeredTasks.Add(task))
         {
+            if (task.isCompleted)
+            {
+                completedTaskSet.Add(task);
+            }
+
             return;
         }
 
@@ -62,6 +89,7 @@ public sealed class TaskManager : MonoBehaviour
             completedTaskSet.Add(task);
         }
 
+        Debug.Log($"[TASK DEBUG] Registered task: {task.TaskName}", task);
         RefreshProgressAndEvents();
     }
 
@@ -72,7 +100,11 @@ public sealed class TaskManager : MonoBehaviour
             return;
         }
 
-        registeredTasks.Add(task);
+        if (!registeredTasks.Contains(task))
+        {
+            registeredTasks.Add(task);
+            Debug.Log($"[TASK DEBUG] Registered task: {task.TaskName}", task);
+        }
 
         if (!completedTaskSet.Add(task))
         {
@@ -80,27 +112,83 @@ public sealed class TaskManager : MonoBehaviour
         }
 
         RefreshProgressAndEvents();
+        Debug.Log($"[TASK DEBUG] Completed task: {task.TaskName} completed={completedTasks}/{totalTasks}", task);
+
+        if (totalTasks > 0 && completedTasks >= totalTasks && !hasRaisedAllTasksCompleted)
+        {
+            hasRaisedAllTasksCompleted = true;
+            Debug.Log("[TASK DEBUG] All tasks completed.", this);
+            OnAllTasksCompleted?.Invoke();
+        }
     }
 
-    void RefreshProgressAndEvents()
+    public void ResetAllTasksForDebug()
     {
-        RefreshUi();
-        OnTaskProgressChanged?.Invoke(taskProgress, completedTasks, totalTasks);
-
-        if (GameEndManager.Instance != null)
+        if (!allowDebugResetTasks)
         {
-            GameEndManager.Instance.CheckLoseConditions();
+            Debug.LogWarning("[TASK DEBUG] Debug reset is disabled.", this);
+            return;
         }
 
-        if (totalTasks > 0 && completedTasks >= totalTasks)
+        TaskInteractable[] tasks = FindObjectsByType<TaskInteractable>(FindObjectsInactive.Include);
+        if (tasks != null)
         {
-            if (!hasRaisedAllTasksCompleted)
+            for (int i = 0; i < tasks.Length; i++)
             {
-                hasRaisedAllTasksCompleted = true;
-                OnAllTasksCompleted?.Invoke();
+                TaskInteractable task = tasks[i];
+                if (task != null)
+                {
+                    task.ResetTaskForDebug();
+                }
+            }
+        }
+
+        completedTaskSet.Clear();
+        hasRaisedAllTasksCompleted = false;
+        RefreshProgressAndEvents();
+    }
+
+    public void CompleteAllTasksForDebug()
+    {
+        TaskInteractable[] tasks = FindObjectsByType<TaskInteractable>(FindObjectsInactive.Include);
+        if (tasks == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < tasks.Length; i++)
+        {
+            TaskInteractable task = tasks[i];
+            if (task != null)
+            {
+                task.CompleteTaskForDebug();
+            }
+        }
+    }
+
+    void RefreshProgressAndEvents(bool allowEventInvoke = true)
+    {
+        RefreshUi();
+
+        if (allowEventInvoke)
+        {
+            OnTaskProgressChanged?.Invoke(taskProgress, completedTasks, totalTasks);
+        }
+
+        if (totalTasks <= 0)
+        {
+            if (!hasWarnedNoTasks)
+            {
+                hasWarnedNoTasks = true;
+                Debug.LogWarning("[TASK DEBUG] No tasks registered.", this);
             }
         }
         else
+        {
+            hasWarnedNoTasks = false;
+        }
+
+        if (totalTasks > 0 && completedTasks < totalTasks)
         {
             hasRaisedAllTasksCompleted = false;
         }
@@ -121,5 +209,63 @@ public sealed class TaskManager : MonoBehaviour
         {
             progressText.text = $"Tasks: {completedTasks}/{totalTasks}";
         }
+
+        if (Mathf.Abs(progress - lastProgressValue) > 0.0001f || completedTasks != lastLoggedCompleted || totalTasks != lastLoggedTotal)
+        {
+            lastProgressValue = progress;
+            lastLoggedCompleted = completedTasks;
+            lastLoggedTotal = totalTasks;
+        }
+    }
+
+    void HandleDebugHotkeys()
+    {
+        if (!enableTaskDebugHotkeys)
+        {
+            return;
+        }
+
+        if (Input.GetKeyDown(KeyCode.T))
+        {
+            PrintTaskSummary();
+        }
+
+        if (Input.GetKeyDown(KeyCode.U))
+        {
+            CompleteAllTasksForDebug();
+        }
+
+        if (Input.GetKeyDown(KeyCode.R))
+        {
+            ResetAllTasksForDebug();
+        }
+    }
+
+    public void PrintTaskSummary()
+    {
+        TaskInteractable[] tasks = FindObjectsByType<TaskInteractable>(FindObjectsInactive.Include);
+        Debug.Log($"[TASK DEBUG] Summary totalTasks={totalTasks} completedTasks={completedTasks} progress01={taskProgress:0.000}", this);
+
+        if (tasks == null || tasks.Length == 0)
+        {
+            Debug.Log("[TASK DEBUG] No task objects found.", this);
+            return;
+        }
+
+        for (int i = 0; i < tasks.Length; i++)
+        {
+            TaskInteractable task = tasks[i];
+            if (task == null)
+            {
+                continue;
+            }
+
+            Debug.Log($"[TASK DEBUG] Task: {task.TaskName} completed={task.isCompleted}", task);
+        }
+    }
+
+    public void RecalculateProgress()
+    {
+        RefreshProgressAndEvents();
     }
 }

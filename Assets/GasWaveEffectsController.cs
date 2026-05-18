@@ -72,10 +72,6 @@ public sealed class GasWaveEffectsController : MonoBehaviour
 
     void Start()
     {
-        alarmSource.clip = alarmClip;
-        alarmSource.Play();
-
-        Debug.Log("PLAYING ALARM");
         SyncToCurrentState();
     }
 
@@ -306,10 +302,21 @@ public sealed class GasWaveEffectsController : MonoBehaviour
             ambientSource.volume = 0f;
         }
 
+        if (alarmSource != null)
+        {
+            alarmSource.Stop();
+        }
+
         if (cameraShakeTarget != null)
         {
             cameraShakeTarget.localPosition = cameraShakeBaseLocalPosition;
         }
+    }
+
+    public void ForceStopGasEffects()
+    {
+        ResetEffectsImmediate();
+        Debug.Log("[GAS] Force stopped gas effects.", this);
     }
 
     void SetEffectsEnabled(bool enabled)

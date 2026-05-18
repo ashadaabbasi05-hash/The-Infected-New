@@ -6,6 +6,8 @@ public sealed class GameEndManager : MonoBehaviour
 {
     public static GameEndManager Instance { get; private set; }
 
+    public bool IsGameEnded => gameEnded;
+
     [Header("UI")]
     [SerializeField] GameObject winPanel;
     [SerializeField] GameObject gameOverPanel;
