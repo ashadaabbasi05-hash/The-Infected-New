@@ -189,7 +189,7 @@ public sealed class MobileActionButtonsController : MonoBehaviour
         if (panel != null)
         {
             panel.TogglePanel();
-            AgentTracePanel.Trace("UI", "Agent Trace toggled from mobile button.");
+            Debug.Log("[MOBILE BUTTONS] TRACE pressed.");
             return;
         }
 
@@ -205,7 +205,7 @@ public sealed class MobileActionButtonsController : MonoBehaviour
         if (demoHelpPanel != null)
         {
             demoHelpPanel.TogglePanel();
-            AgentTracePanel.Trace("UI", "Help panel toggled.");
+            Debug.Log("[MOBILE BUTTONS] HELP pressed.");
             return;
         }
 
@@ -214,7 +214,7 @@ public sealed class MobileActionButtonsController : MonoBehaviour
         {
             demoHelpPanel = found;
             demoHelpPanel.TogglePanel();
-            AgentTracePanel.Trace("UI", "Help panel toggled.");
+            Debug.Log("[MOBILE BUTTONS] HELP pressed.");
             return;
         }
 
