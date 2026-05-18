@@ -338,6 +338,13 @@ public sealed class FinalHuntManager : MonoBehaviour
         }
     }
 
+    // Public demo API for mobile Final Hunt button.
+    public void StartFinalHuntDemo()
+    {
+        AgentTracePanel.Trace("DEMO", "Final Hunt demo button pressed.");
+        CreateFinalHuntDebugState();
+    }
+
     void CreateFinalHuntDebugState()
     {
         if (IsFinalHuntActive)

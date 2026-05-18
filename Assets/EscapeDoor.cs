@@ -17,6 +17,7 @@ public sealed class EscapeDoor : MonoBehaviour
     bool isUnlocked;
     SpriteRenderer spriteRenderer;
     TaskManager subscribedTaskManager;
+    public static EscapeDoor CurrentLocalDoor { get; private set; }
 
     void Awake()
     {
@@ -131,6 +132,8 @@ public sealed class EscapeDoor : MonoBehaviour
             return;
         }
 
+        CurrentLocalDoor = this;
+
         if (identity.isInfected || identity.isAIControlled)
         {
             return;
@@ -160,5 +163,51 @@ public sealed class EscapeDoor : MonoBehaviour
         ObjectiveHUDController.Instance?.HandleHumanWinTriggered();
 
         Debug.Log("Humans escaped. You win.", this);
+    }
+
+    void OnTriggerExit2D(Collider2D other)
+    {
+        PlayerIdentity identity = other != null ? other.GetComponentInParent<PlayerIdentity>() : null;
+        if (identity == null)
+        {
+            return;
+        }
+
+        if (CurrentLocalDoor == this && identity.isLocalPlayer)
+        {
+            CurrentLocalDoor = null;
+        }
+    }
+
+    public void Interact()
+    {
+        if (!isUnlocked)
+        {
+            Debug.Log("[TASK DEBUG] Door locked. Complete all tasks.", this);
+            ObjectiveHUDController.Instance?.RefreshObjectiveText();
+            return;
+        }
+
+        TryResolveGameEndManager();
+
+        if (gameEndManager != null)
+        {
+            gameEndManager.TriggerHumanWin();
+        }
+
+        AgentTracePanel.Trace("OBJECTIVE", "Humans escaped.");
+        ObjectiveHUDController.Instance?.HandleHumanWinTriggered();
+        Debug.Log("Humans escaped. You win.", this);
+    }
+
+    public static bool TryInteractCurrentDoor()
+    {
+        if (CurrentLocalDoor == null)
+        {
+            return false;
+        }
+
+        CurrentLocalDoor.Interact();
+        return true;
     }
 }

@@ -22,6 +22,9 @@ public sealed class TaskInteractable : MonoBehaviour
     PlayerIdentity localPlayerInRange;
     Color originalColor;
 
+    // Mobile helper: current task the local player can interact with
+    public static TaskInteractable CurrentLocalInteractable { get; private set; }
+
     public string TaskName => string.IsNullOrWhiteSpace(taskName) ? gameObject.name : taskName;
     public bool isCompleted => completed;
 
@@ -96,6 +99,7 @@ public sealed class TaskInteractable : MonoBehaviour
         }
 
         localPlayerInRange = identity;
+        CurrentLocalInteractable = this;
         SetPromptVisible(true);
         Debug.Log($"[TASK DEBUG] Player entered task: {TaskName}", this);
     }
@@ -109,6 +113,10 @@ public sealed class TaskInteractable : MonoBehaviour
         }
 
         localPlayerInRange = null;
+        if (CurrentLocalInteractable == this)
+        {
+            CurrentLocalInteractable = null;
+        }
         SetPromptVisible(false);
         Debug.Log($"[TASK DEBUG] Player exited task: {TaskName}", this);
     }
@@ -116,6 +124,17 @@ public sealed class TaskInteractable : MonoBehaviour
     public void Interact()
     {
         AttemptCompletion(false);
+    }
+
+    public static bool TryInteractCurrent()
+    {
+        if (CurrentLocalInteractable == null)
+        {
+            return false;
+        }
+
+        CurrentLocalInteractable.Interact();
+        return true;
     }
 
     public void CompleteTaskForDebug()
@@ -266,7 +285,8 @@ public sealed class TaskInteractable : MonoBehaviour
         interactionPrompt.gameObject.SetActive(visible && !isCompleted);
         if (visible && !isCompleted)
         {
-            interactionPrompt.text = $"Press E: {TaskName}";
+            // Mobile-first prompt
+            interactionPrompt.text = $"INTERACT: {TaskName}";
             interactionPrompt.raycastTarget = false;
         }
     }
