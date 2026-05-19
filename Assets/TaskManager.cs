@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
@@ -9,12 +10,19 @@ public sealed class TaskManager : MonoBehaviour
 {
     public static TaskManager Instance { get; private set; }
 
-    public int totalTasks => registeredTasks.Count;
-    public int completedTasks => completedTaskSet.Count;
-    public float taskProgress => totalTasks <= 0 ? 0f : (float)completedTasks / totalTasks;
-    public int TotalTasks => totalTasks;
-    public int CompletedTasks => completedTasks;
-    public int RemainingTasks => Mathf.Max(0, totalTasks - completedTasks);
+    [Header("Task Totals")]
+    [SerializeField] bool useV4TaskTotal = true;
+    [SerializeField] int v4TotalTasks = 8;
+
+    public int totalTasks => TotalTasks;
+    public int completedTasks => CompletedTasks;
+    public float taskProgress => TotalTasks <= 0 ? 0f : (float)CompletedTasks / TotalTasks;
+    public int TotalTasks => useV4TaskTotal ? Mathf.Max(0, v4TotalTasks) : registeredTasksById.Count;
+    public int CompletedTasks => completedTaskIds.Count;
+    public int RemainingTasks => Mathf.Max(0, TotalTasks - CompletedTasks);
+    public bool AreAllTasksCompleted => TotalTasks > 0 && CompletedTasks >= TotalTasks;
+    public int ExitScanUnlockThreshold => useV4TaskTotal ? Mathf.Max(0, v4TotalTasks - 1) : Mathf.Max(0, TotalTasks - 1);
+    public bool IsExitScanUnlocked => CompletedTasks >= ExitScanUnlockThreshold;
 
     public event Action OnAllTasksCompleted;
     public event Action<float, int, int> OnTaskProgressChanged;
@@ -27,11 +35,15 @@ public sealed class TaskManager : MonoBehaviour
     [SerializeField] bool enableTaskDebugHotkeys = true;
     [SerializeField] bool allowDebugResetTasks;
 
-    readonly HashSet<TaskInteractable> registeredTasks = new HashSet<TaskInteractable>();
-    readonly HashSet<TaskInteractable> completedTaskSet = new HashSet<TaskInteractable>();
+    readonly Dictionary<string, TaskInteractable> registeredTasksById = new Dictionary<string, TaskInteractable>();
+    readonly List<string> registrationOrder = new List<string>();
+    readonly HashSet<string> completedTaskIds = new HashSet<string>();
 
     bool hasRaisedAllTasksCompleted;
     bool hasWarnedNoTasks;
+    bool hasWarnedExpectedV4TaskCount;
+    bool hasCompletedV4TaskCountCheck;
+    bool hasTracedExitScanUnlocked;
     float lastProgressValue = -1f;
     int lastLoggedCompleted = -1;
     int lastLoggedTotal = -1;
@@ -52,6 +64,15 @@ public sealed class TaskManager : MonoBehaviour
     void Start()
     {
         RefreshProgressAndEvents(false);
+
+        if (useV4TaskTotal)
+        {
+            StartCoroutine(ValidateV4TaskCountAfterStart());
+        }
+        else
+        {
+            hasCompletedV4TaskCountCheck = true;
+        }
     }
 
     void OnDestroy()
@@ -74,52 +95,126 @@ public sealed class TaskManager : MonoBehaviour
             return;
         }
 
-        if (!registeredTasks.Add(task))
+        string taskId = task.TaskId;
+        if (string.IsNullOrWhiteSpace(taskId))
         {
-            if (task.isCompleted)
+            taskId = task.gameObject.name;
+        }
+
+        if (registeredTasksById.TryGetValue(taskId, out TaskInteractable existingTask))
+        {
+            if (existingTask == task)
             {
-                completedTaskSet.Add(task);
+                if (task.isCompleted)
+                {
+                    completedTaskIds.Add(taskId);
+                }
+
+                return;
             }
 
+            Debug.LogWarning($"[TASK DEBUG] Duplicate taskId ignored: {taskId}", task);
             return;
         }
+
+        registeredTasksById.Add(taskId, task);
+        registrationOrder.Add(taskId);
 
         if (task.isCompleted)
         {
-            completedTaskSet.Add(task);
+            completedTaskIds.Add(taskId);
         }
 
-        Debug.Log($"[TASK DEBUG] Registered task: {task.TaskName}", task);
+        Debug.Log($"[TASK DEBUG] Registered task: {taskId} {task.TaskDisplayName}", task);
         RefreshProgressAndEvents();
     }
 
-    public void CompleteTask(TaskInteractable task)
+    public bool CanCompleteTask(TaskInteractable task, bool debugForce, out string reason)
     {
         if (task == null)
         {
-            return;
+            reason = "Task missing.";
+            return false;
         }
 
-        if (!registeredTasks.Contains(task))
+        string taskId = task.TaskId;
+        if (string.IsNullOrWhiteSpace(taskId))
         {
-            registeredTasks.Add(task);
-            Debug.Log($"[TASK DEBUG] Registered task: {task.TaskName}", task);
+            reason = "Task id missing.";
+            return false;
         }
 
-        if (!completedTaskSet.Add(task))
+        if (!registeredTasksById.TryGetValue(taskId, out TaskInteractable registeredTask) || registeredTask != task)
         {
-            return;
+            reason = $"Task not registered: {taskId}";
+            return false;
+        }
+
+        if (completedTaskIds.Contains(taskId))
+        {
+            reason = $"Task already completed: {taskId}";
+            return false;
+        }
+
+        if (!debugForce && task.IsExitScanTask && !IsExitScanUnlocked)
+        {
+            reason = "Exit Scan locked until all wire tasks are complete.";
+            return false;
+        }
+
+        reason = string.Empty;
+        return true;
+    }
+
+    public bool CompleteTask(TaskInteractable task, bool debugForce = false)
+    {
+        if (!CanCompleteTask(task, debugForce, out string reason))
+        {
+            if (!string.IsNullOrWhiteSpace(reason))
+            {
+                if (reason == "Exit Scan locked until all wire tasks are complete.")
+                {
+                    Debug.Log($"[TASK DEBUG] {reason}", task);
+                }
+                else
+                {
+                    Debug.LogWarning($"[TASK DEBUG] {reason}", task);
+                }
+            }
+
+            return false;
+        }
+
+        string taskId = task.TaskId;
+        completedTaskIds.Add(taskId);
+
+        Debug.Log($"[TASK DEBUG] Task completed: {taskId} {task.TaskDisplayName} completed={CompletedTasks}/{TotalTasks}", task);
+
+        if (task.IsExitScanTask)
+        {
+            AgentTracePanel.Trace("OBJECTIVE", "Exit Scan completed. Escape route opened.");
+        }
+        else
+        {
+            AgentTracePanel.Trace("OBJECTIVE", $"{task.TaskDisplayName} completed.");
         }
 
         RefreshProgressAndEvents();
-        Debug.Log($"[TASK DEBUG] Completed task: {task.TaskName} completed={completedTasks}/{totalTasks}", task);
 
-        if (totalTasks > 0 && completedTasks >= totalTasks && !hasRaisedAllTasksCompleted)
+        if (!hasTracedExitScanUnlocked && IsExitScanUnlocked)
+        {
+            hasTracedExitScanUnlocked = true;
+            AgentTracePanel.Trace("OBJECTIVE", "Exit Scan unlocked.");
+        }
+
+        if (AreAllTasksCompleted && !hasRaisedAllTasksCompleted)
         {
             hasRaisedAllTasksCompleted = true;
             Debug.Log("[TASK DEBUG] All tasks completed.", this);
             OnAllTasksCompleted?.Invoke();
         }
+
+        return true;
     }
 
     public void ResetAllTasksForDebug()
@@ -143,8 +238,9 @@ public sealed class TaskManager : MonoBehaviour
             }
         }
 
-        completedTaskSet.Clear();
+        completedTaskIds.Clear();
         hasRaisedAllTasksCompleted = false;
+        hasTracedExitScanUnlocked = false;
         RefreshProgressAndEvents();
     }
 
@@ -175,7 +271,7 @@ public sealed class TaskManager : MonoBehaviour
             OnTaskProgressChanged?.Invoke(taskProgress, completedTasks, totalTasks);
         }
 
-        if (totalTasks <= 0)
+        if (TotalTasks <= 0)
         {
             if (!hasWarnedNoTasks)
             {
@@ -188,9 +284,14 @@ public sealed class TaskManager : MonoBehaviour
             hasWarnedNoTasks = false;
         }
 
-        if (totalTasks > 0 && completedTasks < totalTasks)
+        if (TotalTasks > 0 && CompletedTasks < TotalTasks)
         {
             hasRaisedAllTasksCompleted = false;
+        }
+
+        if (hasCompletedV4TaskCountCheck)
+        {
+            WarnIfExpectedV4TaskCountMissing();
         }
     }
 
@@ -207,14 +308,14 @@ public sealed class TaskManager : MonoBehaviour
 
         if (progressText != null)
         {
-            progressText.text = $"Tasks: {completedTasks}/{totalTasks}";
+            progressText.text = $"Tasks: {CompletedTasks}/{TotalTasks}";
         }
 
-        if (Mathf.Abs(progress - lastProgressValue) > 0.0001f || completedTasks != lastLoggedCompleted || totalTasks != lastLoggedTotal)
+        if (Mathf.Abs(progress - lastProgressValue) > 0.0001f || CompletedTasks != lastLoggedCompleted || TotalTasks != lastLoggedTotal)
         {
             lastProgressValue = progress;
-            lastLoggedCompleted = completedTasks;
-            lastLoggedTotal = totalTasks;
+            lastLoggedCompleted = CompletedTasks;
+            lastLoggedTotal = TotalTasks;
         }
     }
 
@@ -243,29 +344,51 @@ public sealed class TaskManager : MonoBehaviour
 
     public void PrintTaskSummary()
     {
-        TaskInteractable[] tasks = FindObjectsByType<TaskInteractable>(FindObjectsInactive.Include);
-        Debug.Log($"[TASK DEBUG] Summary totalTasks={totalTasks} completedTasks={completedTasks} progress01={taskProgress:0.000}", this);
+        Debug.Log($"[TASK DEBUG] Summary completed={CompletedTasks}/{TotalTasks} remaining={RemainingTasks} exitScan={(IsExitScanUnlocked ? "unlocked" : "locked")}", this);
+        Debug.Log($"[TASK DEBUG] Registered tasks={registeredTasksById.Count} expectedV4={v4TotalTasks} useV4={useV4TaskTotal}", this);
 
-        if (tasks == null || tasks.Length == 0)
+        if (registrationOrder.Count == 0)
         {
             Debug.Log("[TASK DEBUG] No task objects found.", this);
             return;
         }
 
-        for (int i = 0; i < tasks.Length; i++)
+        for (int i = 0; i < registrationOrder.Count; i++)
         {
-            TaskInteractable task = tasks[i];
-            if (task == null)
+            string taskId = registrationOrder[i];
+            if (!registeredTasksById.TryGetValue(taskId, out TaskInteractable task) || task == null)
             {
                 continue;
             }
 
-            Debug.Log($"[TASK DEBUG] Task: {task.TaskName} completed={task.isCompleted}", task);
+            bool exitScanLocked = task.IsExitScanTask && !IsExitScanUnlocked;
+            Debug.Log($"[TASK DEBUG] Task: {taskId} {task.TaskDisplayName} completed={completedTaskIds.Contains(taskId)} exitScanLocked={exitScanLocked}", task);
         }
     }
 
     public void RecalculateProgress()
     {
         RefreshProgressAndEvents();
+    }
+
+    IEnumerator ValidateV4TaskCountAfterStart()
+    {
+        yield return null;
+        hasCompletedV4TaskCountCheck = true;
+        WarnIfExpectedV4TaskCountMissing();
+    }
+
+    void WarnIfExpectedV4TaskCountMissing()
+    {
+        if (!useV4TaskTotal || hasWarnedExpectedV4TaskCount)
+        {
+            return;
+        }
+
+        if (registeredTasksById.Count < v4TotalTasks)
+        {
+            hasWarnedExpectedV4TaskCount = true;
+            Debug.LogWarning($"[TASK DEBUG] Expected 8 V4 tasks but found {registeredTasksById.Count}.", this);
+        }
     }
 }

@@ -68,6 +68,7 @@ public sealed class PhysicalInfectionZone : MonoBehaviour
         if (!sourceIdentity.isAlive) return false;
         if (!sourceIdentity.isInfected) return false;
         if (!sourceIdentity.isAIControlled) return false;
+        if (sourceIdentity.isFrozen) return false;
         return true;
     }
 
@@ -78,6 +79,7 @@ public sealed class PhysicalInfectionZone : MonoBehaviour
         if (!target.isAlive) return false;
         if (target.isInfected) return false;
         if (target.isAIControlled) return false;
+        if (target.isFrozen) return false;
         return true;
     }
 

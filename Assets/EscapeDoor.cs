@@ -99,7 +99,7 @@ public sealed class EscapeDoor : MonoBehaviour
             return;
         }
 
-        if (subscribedTaskManager.totalTasks > 0 && subscribedTaskManager.completedTasks >= subscribedTaskManager.totalTasks)
+        if (subscribedTaskManager.AreAllTasksCompleted)
         {
             HandleAllTasksCompleted();
         }

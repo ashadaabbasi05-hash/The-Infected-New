@@ -1,13 +1,30 @@
+using System;
 using TMPro;
 using UnityEngine;
+using UnityEngine.UI;
 
 [DisallowMultipleComponent]
 [RequireComponent(typeof(Collider2D))]
 public sealed class TaskInteractable : MonoBehaviour
 {
     [Header("Task")]
+    [SerializeField] string taskId;
+    [SerializeField] string taskDisplayName;
     [SerializeField] string taskName = "Fix Wiring";
+    [SerializeField] bool isExitScanTask;
     [SerializeField] bool completed;
+
+    [Header("Exit Scan")]
+    [SerializeField, Min(0.1f)] float exitScanDuration = 5f;
+    [SerializeField] bool resetExitScanOnRelease = true;
+    [SerializeField] Slider exitScanProgressSlider;
+    [SerializeField] TMP_Text exitScanProgressText;
+    [SerializeField] TMP_Text exitScanPromptText;
+    [SerializeField] bool showExitScanDebugLogs = true;
+
+    [Header("Wire Task")]
+    [SerializeField] bool useWireMinigame = true;
+    [SerializeField] WireTaskMinigame wireTaskMinigame;
 
     [Header("UI")]
     [SerializeField] TMP_Text interactionPrompt;
@@ -22,10 +39,18 @@ public sealed class TaskInteractable : MonoBehaviour
     PlayerIdentity localPlayerInRange;
     Color originalColor;
 
+    bool isScanningExit;
+    float exitScanProgress;
+    bool exitScanUnlocked;
+
     // Mobile helper: current task the local player can interact with
     public static TaskInteractable CurrentLocalInteractable { get; private set; }
 
-    public string TaskName => string.IsNullOrWhiteSpace(taskName) ? gameObject.name : taskName;
+    public string TaskId => !string.IsNullOrWhiteSpace(taskId) ? taskId : gameObject.name;
+    public string TaskDisplayName => !string.IsNullOrWhiteSpace(taskDisplayName) ? taskDisplayName : taskName;
+    public string TaskName => TaskDisplayName;
+    public bool IsExitScanTask => isExitScanTask;
+    public bool IsScanningExit => isScanningExit;
     public bool isCompleted => completed;
 
     void Awake()
@@ -40,17 +65,17 @@ public sealed class TaskInteractable : MonoBehaviour
 
         if (taskCollider == null)
         {
-            Debug.LogWarning($"[TASK DEBUG] {TaskName} missing Collider2D.", this);
+            Debug.LogWarning($"[TASK DEBUG] {TaskDisplayName} missing Collider2D.", this);
         }
         else if (!taskCollider.isTrigger)
         {
-            Debug.LogWarning($"[TASK DEBUG] {TaskName} Collider2D is not trigger.", this);
+            Debug.LogWarning($"[TASK DEBUG] {TaskDisplayName} Collider2D is not trigger.", this);
             taskCollider.isTrigger = true;
         }
 
         if (spriteRenderer == null)
         {
-            Debug.LogWarning($"[TASK DEBUG] {TaskName} missing SpriteRenderer.", this);
+            Debug.LogWarning($"[TASK DEBUG] {TaskDisplayName} missing SpriteRenderer.", this);
         }
 
         UpdateVisualState();
@@ -74,6 +99,12 @@ public sealed class TaskInteractable : MonoBehaviour
             CompleteTaskForDebug();
         }
 
+        if (isExitScanTask)
+        {
+            UpdateExitScanHoldState();
+            return;
+        }
+
         if (completed || localPlayerInRange == null)
         {
             return;
@@ -92,7 +123,7 @@ public sealed class TaskInteractable : MonoBehaviour
         {
             if (identity != null)
             {
-                Debug.Log($"[TASK DEBUG] Cannot use {TaskName}: {invalidReason}", this);
+                Debug.Log($"[TASK DEBUG] Cannot use {TaskDisplayName}: {invalidReason}", this);
             }
 
             return;
@@ -101,7 +132,7 @@ public sealed class TaskInteractable : MonoBehaviour
         localPlayerInRange = identity;
         CurrentLocalInteractable = this;
         SetPromptVisible(true);
-        Debug.Log($"[TASK DEBUG] Player entered task: {TaskName}", this);
+        Debug.Log($"[TASK DEBUG] Player entered task: {TaskDisplayName}", this);
     }
 
     void OnTriggerExit2D(Collider2D other)
@@ -117,13 +148,86 @@ public sealed class TaskInteractable : MonoBehaviour
         {
             CurrentLocalInteractable = null;
         }
+        if (isExitScanTask)
+        {
+            StopHoldInteract();
+        }
         SetPromptVisible(false);
-        Debug.Log($"[TASK DEBUG] Player exited task: {TaskName}", this);
+        Debug.Log($"[TASK DEBUG] Player exited task: {TaskDisplayName}", this);
     }
 
     public void Interact()
     {
+        if (isExitScanTask)
+        {
+            StartHoldInteract();
+            return;
+        }
+
+        if (TryOpenWireMinigame())
+        {
+            return;
+        }
+
         AttemptCompletion(false);
+    }
+
+    public void StartHoldInteract()
+    {
+        if (!isExitScanTask)
+        {
+            Interact();
+            return;
+        }
+
+        if (completed)
+        {
+            return;
+        }
+
+        exitScanUnlocked = IsExitScanUnlocked();
+        if (!CanUseExitScan(out string reason))
+        {
+            if (showExitScanDebugLogs && !string.IsNullOrWhiteSpace(reason))
+            {
+                Debug.Log($"[TASK DEBUG] {reason}", this);
+            }
+
+            RefreshExitScanUi();
+            return;
+        }
+
+        isScanningExit = true;
+        RefreshExitScanUi();
+    }
+
+    public void StopHoldInteract()
+    {
+        if (!isExitScanTask || completed)
+        {
+            return;
+        }
+
+        if (!isScanningExit)
+        {
+            RefreshExitScanUi();
+            return;
+        }
+
+        isScanningExit = false;
+
+        if (resetExitScanOnRelease && exitScanProgress > 0f && exitScanProgress < exitScanDuration)
+        {
+            exitScanProgress = 0f;
+            RefreshExitScanUi();
+            if (showExitScanDebugLogs)
+            {
+                Debug.Log("[TASK DEBUG] Exit Scan interrupted. Progress reset.", this);
+            }
+            return;
+        }
+
+        RefreshExitScanUi();
     }
 
     public static bool TryInteractCurrent()
@@ -142,18 +246,52 @@ public sealed class TaskInteractable : MonoBehaviour
         AttemptCompletion(true);
     }
 
+    public void CompleteFromMinigame()
+    {
+        if (completed)
+        {
+            return;
+        }
+
+        if (isExitScanTask)
+        {
+            return;
+        }
+
+        AttemptCompletion(false);
+    }
+
     public void ResetTaskForDebug()
     {
         completed = false;
+        isScanningExit = false;
+        exitScanProgress = 0f;
+        exitScanUnlocked = false;
         UpdateVisualState();
         SetPromptVisible(localPlayerInRange != null);
+    }
+
+    public bool IsExitScanUnlocked()
+    {
+        TaskManager taskManager = ResolveTaskManager();
+        return taskManager != null && taskManager.IsExitScanUnlocked;
+    }
+
+    public float GetExitScanProgress01()
+    {
+        if (exitScanDuration <= 0f)
+        {
+            return 1f;
+        }
+
+        return Mathf.Clamp01(exitScanProgress / exitScanDuration);
     }
 
     void AttemptCompletion(bool debugForce)
     {
         if (completed)
         {
-            Debug.Log($"[TASK DEBUG] Task already completed: {TaskName}", this);
+            Debug.Log($"[TASK DEBUG] Task already completed: {TaskId} {TaskDisplayName}", this);
             return;
         }
 
@@ -167,13 +305,13 @@ public sealed class TaskInteractable : MonoBehaviour
 
             if (localPlayerInRange == null)
             {
-                Debug.Log($"[TASK DEBUG] Cannot complete {TaskName}: no player in range.", this);
+                Debug.Log($"[TASK DEBUG] Cannot complete {TaskDisplayName}: no player in range.", this);
                 return;
             }
 
             if (!IsValidTaskPlayer(localPlayerInRange, out string playerReason))
             {
-                Debug.Log($"[TASK DEBUG] Cannot complete {TaskName}: {playerReason}", this);
+                Debug.Log($"[TASK DEBUG] Cannot complete {TaskDisplayName}: {playerReason}", this);
                 return;
             }
 
@@ -183,16 +321,30 @@ public sealed class TaskInteractable : MonoBehaviour
             }
         }
 
+        TaskManager manager = ResolveTaskManager();
+        if (manager != null && !manager.CanCompleteTask(this, debugForce, out string managerReason))
+        {
+            if (!string.IsNullOrWhiteSpace(managerReason))
+            {
+                Debug.Log($"[TASK DEBUG] {managerReason}", this);
+            }
+
+            return;
+        }
+
         completed = true;
         localPlayerInRange = null;
 
         UpdateVisualState();
         SetPromptVisible(false);
-        Debug.Log($"[TASK DEBUG] Task completed: {TaskName}", this);
 
-        if (TaskManager.Instance != null)
+        if (manager != null)
         {
-            TaskManager.Instance.CompleteTask(this);
+            manager.CompleteTask(this, debugForce);
+        }
+        else
+        {
+            Debug.Log($"[TASK DEBUG] Task completed: {TaskId} {TaskDisplayName}", this);
         }
     }
 
@@ -247,6 +399,12 @@ public sealed class TaskInteractable : MonoBehaviour
             return false;
         }
 
+        if (identity.isFrozen)
+        {
+            reason = $"{identity.playerName} is frozen.";
+            return false;
+        }
+
         Rigidbody2D body = identity.GetComponentInParent<Rigidbody2D>();
         if (body == null)
         {
@@ -265,18 +423,282 @@ public sealed class TaskInteractable : MonoBehaviour
 
     void RegisterWithTaskManager()
     {
-        TaskManager taskManager = TaskManager.Instance != null ? TaskManager.Instance : FindAnyObjectByType<TaskManager>(FindObjectsInactive.Include);
+        TaskManager taskManager = ResolveTaskManager();
         if (taskManager == null)
         {
-            Debug.LogWarning($"[TASK DEBUG] No TaskManager found for {TaskName}", this);
+            Debug.LogWarning($"[TASK DEBUG] No TaskManager found for {TaskDisplayName}", this);
             return;
         }
 
         taskManager.RegisterTask(this);
     }
 
+    TaskManager ResolveTaskManager()
+    {
+        return TaskManager.Instance != null ? TaskManager.Instance : FindAnyObjectByType<TaskManager>(FindObjectsInactive.Include);
+    }
+
+    bool IsWireTask()
+    {
+        return TaskId.StartsWith("wire_", StringComparison.OrdinalIgnoreCase);
+    }
+
+    WireTaskMinigame ResolveWireTaskMinigame()
+    {
+        if (wireTaskMinigame != null)
+        {
+            return wireTaskMinigame;
+        }
+
+        wireTaskMinigame = FindAnyObjectByType<WireTaskMinigame>(FindObjectsInactive.Include);
+        return wireTaskMinigame;
+    }
+
+    bool TryOpenWireMinigame()
+    {
+        if (!useWireMinigame || !IsWireTask() || isExitScanTask)
+        {
+            return false;
+        }
+
+        if (completed)
+        {
+            return true;
+        }
+
+        if (IsBlockedByGamePhase(out string phaseReason))
+        {
+            Debug.Log($"[TASK DEBUG] {phaseReason}", this);
+            return true;
+        }
+
+        if (localPlayerInRange == null)
+        {
+            Debug.Log($"[TASK DEBUG] Cannot complete {TaskDisplayName}: no player in range.", this);
+            return true;
+        }
+
+        if (!IsValidTaskPlayer(localPlayerInRange, out string playerReason))
+        {
+            Debug.Log($"[TASK DEBUG] Cannot complete {TaskDisplayName}: {playerReason}", this);
+            return true;
+        }
+
+        WireTaskMinigame minigame = ResolveWireTaskMinigame();
+        if (minigame == null)
+        {
+            Debug.LogWarning("[WIRE TASK] WireTaskMinigame missing. Falling back to instant completion.", this);
+            return false;
+        }
+
+        minigame.Open(this);
+        return true;
+    }
+
+    void UpdateExitScanHoldState()
+    {
+        if (completed)
+        {
+            return;
+        }
+
+        if (localPlayerInRange == null)
+        {
+            StopHoldInteract();
+            SetPromptVisible(false);
+            return;
+        }
+
+        exitScanUnlocked = IsExitScanUnlocked();
+
+        if (IsBlockedByGamePhase(out string phaseReason))
+        {
+            isScanningExit = false;
+            RefreshExitScanUi(phaseReason);
+            return;
+        }
+
+        if (!IsValidTaskPlayer(localPlayerInRange, out string playerReason))
+        {
+            isScanningExit = false;
+            RefreshExitScanUi(playerReason);
+            return;
+        }
+
+        if (!exitScanUnlocked)
+        {
+            isScanningExit = false;
+            RefreshExitScanUi();
+            return;
+        }
+
+        bool holdActive = Input.GetKey(KeyCode.E) || (MobileActionButtonsController.Instance != null && MobileActionButtonsController.Instance.IsInteractHeld);
+
+        if (!holdActive)
+        {
+            if (isScanningExit)
+            {
+                StopHoldInteract();
+            }
+            else
+            {
+                RefreshExitScanUi();
+            }
+
+            return;
+        }
+
+        isScanningExit = true;
+        exitScanProgress += Time.deltaTime;
+        RefreshExitScanUi();
+
+        if (exitScanProgress >= exitScanDuration)
+        {
+            CompleteExitScan();
+        }
+    }
+
+    void CompleteExitScan()
+    {
+        if (completed)
+        {
+            return;
+        }
+
+        isScanningExit = false;
+        exitScanProgress = exitScanDuration;
+        completed = true;
+
+        if (CurrentLocalInteractable == this)
+        {
+            CurrentLocalInteractable = null;
+        }
+
+        UpdateVisualState();
+        SetPromptVisible(false);
+
+        TaskManager manager = ResolveTaskManager();
+        if (manager != null)
+        {
+            manager.CompleteTask(this);
+        }
+        else
+        {
+            AgentTracePanel.Trace("OBJECTIVE", "Exit Scan completed. Escape route opened.");
+        }
+
+        if (showExitScanDebugLogs)
+        {
+            Debug.Log("[TASK DEBUG] Exit Scan completed.", this);
+        }
+    }
+
+    bool CanUseExitScan(out string reason)
+    {
+        if (completed)
+        {
+            reason = "Exit Scan already completed.";
+            return false;
+        }
+
+        TaskManager taskManager = ResolveTaskManager();
+        if (taskManager == null)
+        {
+            reason = "TaskManager missing for Exit Scan.";
+            return false;
+        }
+
+        if (!taskManager.IsExitScanUnlocked)
+        {
+            reason = "Exit Scan locked until all wire tasks are complete.";
+            return false;
+        }
+
+        if (localPlayerInRange == null)
+        {
+            reason = "Exit Scan requires a player in range.";
+            return false;
+        }
+
+        if (IsBlockedByGamePhase(out string phaseReason))
+        {
+            reason = phaseReason;
+            return false;
+        }
+
+        if (!IsValidTaskPlayer(localPlayerInRange, out string playerReason))
+        {
+            reason = playerReason;
+            return false;
+        }
+
+        reason = string.Empty;
+        return true;
+    }
+
+    void RefreshExitScanUi(string overridePrompt = null)
+    {
+        TMP_Text promptText = ResolveExitScanPromptText();
+        bool showUi = localPlayerInRange != null && !completed;
+
+        if (promptText != null)
+        {
+            promptText.gameObject.SetActive(showUi);
+
+            if (showUi)
+            {
+                if (!string.IsNullOrWhiteSpace(overridePrompt))
+                {
+                    promptText.text = overridePrompt;
+                }
+                else if (!exitScanUnlocked)
+                {
+                    promptText.text = "Exit Scan locked\nComplete wire tasks";
+                }
+                else if (isScanningExit)
+                {
+                    promptText.text = $"Scanning exit... {Mathf.RoundToInt(GetExitScanProgress01() * 100f)}%";
+                }
+                else
+                {
+                    promptText.text = "Hold INTERACT to scan exit";
+                }
+
+                promptText.raycastTarget = false;
+            }
+        }
+
+        if (exitScanProgressSlider != null)
+        {
+            exitScanProgressSlider.gameObject.SetActive(showUi);
+            exitScanProgressSlider.minValue = 0f;
+            exitScanProgressSlider.maxValue = 1f;
+            exitScanProgressSlider.value = GetExitScanProgress01();
+        }
+
+        if (exitScanProgressText != null)
+        {
+            exitScanProgressText.gameObject.SetActive(showUi);
+            exitScanProgressText.text = showUi
+                ? $"Exit Scan: {Mathf.RoundToInt(GetExitScanProgress01() * 100f)}%"
+                : string.Empty;
+            exitScanProgressText.raycastTarget = false;
+        }
+    }
+
+    TMP_Text ResolveExitScanPromptText()
+    {
+        return exitScanPromptText != null ? exitScanPromptText : interactionPrompt;
+    }
+
     void SetPromptVisible(bool visible)
     {
+        if (isExitScanTask)
+        {
+            RefreshExitScanUi();
+            return;
+        }
+
         if (interactionPrompt == null)
         {
             return;
@@ -286,7 +708,7 @@ public sealed class TaskInteractable : MonoBehaviour
         if (visible && !isCompleted)
         {
             // Mobile-first prompt
-            interactionPrompt.text = $"INTERACT: {TaskName}";
+            interactionPrompt.text = $"INTERACT: {TaskDisplayName}";
             interactionPrompt.raycastTarget = false;
         }
     }

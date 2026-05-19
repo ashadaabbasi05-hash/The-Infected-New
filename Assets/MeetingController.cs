@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
@@ -27,14 +28,22 @@ public sealed class MeetingController : MonoBehaviour
     [Header("Timing")]
     [SerializeField, Min(1f)] float discussionDuration = 20f;
     [SerializeField, Min(1f)] float votingDuration = 20f;
-    [SerializeField, Min(0f)] float curingDuration = 10f;
+    [SerializeField, Min(1f)] float antidoteFreezeDuration = 10f;
+
+    [Header("Antidote UI")]
+    [SerializeField, Tooltip("Personal antidote/curing overlay shown to local player if they are antidote target.")]
+    GameObject personalAntidotePanel;
+    [SerializeField] TMP_Text personalAntidoteText;
+    [SerializeField] TMP_Text personalAntidoteTimerText;
 
     [Header("Behavior")]
     [Tooltip("If true, this controller tells GameManager to switch Voting/Exploration phases automatically when timers end.")]
     [SerializeField] bool autoAdvanceGameManagerPhases = true;
     [SerializeField] bool enablePrototypeAIVotes = true;
+    [SerializeField] bool disableAIVotesForManualTesting = false;
     [SerializeField] bool allowNonLocalHumansToAutoVote = true;
     [SerializeField] bool enableDebugHotkeys = true;
+    [SerializeField] bool showPrivateAntidoteDebugTrace = false;
 
     [Header("UI Feedback")]
     [SerializeField] TMP_Text resultText;
@@ -46,12 +55,18 @@ public sealed class MeetingController : MonoBehaviour
     MeetingFlowState flowState = MeetingFlowState.Idle;
     float phaseTimer;
     bool hasResolvedVoting;
+    bool localVoteCast;
+    bool personalAntidotePanelMissingWarningLogged;
+    bool personalAntidoteUiWiredLogged;
 
     PlayerIdentity localVoter;
+    PlayerIdentity currentAntidoteTarget;
+    Coroutine activeAntidoteRoutine;
 
     void Awake()
     {
         AutoAssignReferences();
+        AutoAssignPersonalAntidoteReferences();
 
         if (meetingPanel != null)
         {
@@ -63,12 +78,14 @@ public sealed class MeetingController : MonoBehaviour
             timerText.text = string.Empty;
         }
 
+        HidePersonalAntidoteOverlay();
         ResolveGameManagerReference();
     }
 
     void Start()
     {
         AutoAssignReferences();
+        AutoAssignPersonalAntidoteReferences();
 
         if (gameManager == null)
         {
@@ -97,10 +114,13 @@ public sealed class MeetingController : MonoBehaviour
         if (!autoFindUiReferences)
         {
             SanitizeVoteButtonList();
-            return;
+        }
+        else
+        {
+            AutoAssignReferences();
         }
 
-        AutoAssignReferences();
+        AutoAssignPersonalAntidoteReferences();
         SanitizeVoteButtonList();
     }
 
@@ -195,9 +215,18 @@ public sealed class MeetingController : MonoBehaviour
 
         RefreshAlivePlayers();
 
+        // CRITICAL: Clean state for new voting phase
+        votesByTargetPlayerId.Clear();
+        playersWhoVoted.Clear();
+        localVoteCast = false;  // ← Used here to reset local player vote flag
+        currentAntidoteTarget = null;
+        HidePersonalAntidoteOverlay();
+
         flowState = MeetingFlowState.Voting;
         phaseTimer = votingDuration;
         hasResolvedVoting = false;
+
+        localVoter = FindLocalVoter();
 
         EnsureVoteContainersInitialized();
 
@@ -207,10 +236,17 @@ public sealed class MeetingController : MonoBehaviour
         }
 
         ConfigureVoteButtons(true);
-        CastAIVotes();
+        if (disableAIVotesForManualTesting)
+        {
+            Debug.Log("[VOTE DEBUG] AI votes disabled for manual testing.", this);
+        }
+        else
+        {
+            CastAIVotes();
+        }
         UpdateTimerText();
 
-        Debug.Log("Voting started.", this);
+        Debug.Log($"[VOTE DEBUG] Voting started. Eligible voters={alivePlayers.Count}. {(disableAIVotesForManualTesting ? "AI votes disabled for manual testing." : "AI votes cast.")}", this);
     }
 
     // Called by timer, GameManager phase transition, or manually.
@@ -227,10 +263,9 @@ public sealed class MeetingController : MonoBehaviour
             ResolveVotingOutcome();
             hasResolvedVoting = true;
 
-            if (flowState != MeetingFlowState.Curing)
-            {
-                StartCuringPhase();
-            }
+            // Antidote sequence will handle flow transition
+            // (sets Curing state, waits 10 seconds, finalizes)
+            // Don't call StartCuringPhase here; ApplyAntidote handles it
 
             return;
         }
@@ -241,26 +276,36 @@ public sealed class MeetingController : MonoBehaviour
     /// </summary>
     void OnVoteButtonPressedForPlayerId(int targetPlayerId)
     {
+        Debug.Log($"[VOTE DEBUG] Vote button pressed targetPlayerId={targetPlayerId}", this);
+
         if (flowState != MeetingFlowState.Voting)
         {
             Debug.LogWarning("Vote button pressed outside voting phase.", this);
             return;
         }
 
-        if (localVoter == null || !localVoter.isAlive)
+        // Check if local player already voted (prevents multiple votes)
+        if (localVoteCast)  // ← Used here to prevent duplicate local votes
         {
-            Debug.LogWarning("No valid local voter found.", this);
+            Debug.Log("[VOTE DEBUG] Local player already voted. Duplicate vote rejected.", this);
+            return;
+        }
+
+        if (localVoter == null || !localVoter.isAlive || localVoter.isFrozen)
+        {
+            Debug.LogWarning("No valid local voter found or voter is frozen.", this);
             return;
         }
 
         // Find target by stable playerId, not list index.
         PlayerIdentity target = FindPlayerById(targetPlayerId);
-        if (target == null || !target.isAlive)
+        if (target == null || !target.isAlive || target.isFrozen)
         {
-            Debug.LogWarning($"Vote target playerId {targetPlayerId} not found or dead.", this);
+            Debug.LogWarning($"Vote target playerId {targetPlayerId} not found, dead, or frozen.", this);
             return;
         }
 
+        Debug.Log($"[VOTE DEBUG] Vote button resolved target: {target.playerName} playerId={target.playerId}", this);
         CastVote(localVoter, target);
     }
 
@@ -368,6 +413,76 @@ public sealed class MeetingController : MonoBehaviour
         }
     }
 
+    void AutoAssignPersonalAntidoteReferences()
+    {
+        if (personalAntidotePanel == null)
+        {
+            GameObject panelObject = GameObject.Find("PersonalAntidotePanel");
+            if (panelObject == null)
+            {
+                Transform panelTransform = FindSceneTransformByName("PersonalAntidotePanel");
+                if (panelTransform != null)
+                {
+                    panelObject = panelTransform.gameObject;
+                }
+            }
+
+            personalAntidotePanel = panelObject;
+        }
+
+        if (personalAntidotePanel != null)
+        {
+            TMP_Text[] texts = personalAntidotePanel.GetComponentsInChildren<TMP_Text>(true);
+
+            if (personalAntidoteText == null)
+            {
+                for (int i = 0; i < texts.Length; i++)
+                {
+                    TMP_Text text = texts[i];
+                    if (text != null && !string.Equals(text.gameObject.name, "PersonalAntidoteTimerText", StringComparison.Ordinal))
+                    {
+                        personalAntidoteText = text;
+                        break;
+                    }
+                }
+
+                if (personalAntidoteText == null && texts.Length > 0)
+                {
+                    personalAntidoteText = texts[0];
+                }
+            }
+
+            if (personalAntidoteTimerText == null)
+            {
+                for (int i = 0; i < texts.Length; i++)
+                {
+                    TMP_Text text = texts[i];
+                    if (text != null && string.Equals(text.gameObject.name, "PersonalAntidoteTimerText", StringComparison.Ordinal))
+                    {
+                        personalAntidoteTimerText = text;
+                        break;
+                    }
+                }
+
+                if (personalAntidoteTimerText == null)
+                {
+                    personalAntidoteTimerText = personalAntidoteText;
+                }
+            }
+
+            if (!personalAntidoteUiWiredLogged)
+            {
+                personalAntidoteUiWiredLogged = true;
+                Debug.Log("[ANTIDOTE UI] Personal antidote panel wired.", this);
+            }
+        }
+        else if (!personalAntidotePanelMissingWarningLogged)
+        {
+            personalAntidotePanelMissingWarningLogged = true;
+            Debug.LogWarning("[ANTIDOTE UI] Personal antidote panel missing.", this);
+        }
+    }
+
     Transform FindSceneTransformByName(string objectName)
     {
         Transform[] allTransforms = Resources.FindObjectsOfTypeAll<Transform>();
@@ -448,13 +563,8 @@ public sealed class MeetingController : MonoBehaviour
         if (flowState == MeetingFlowState.Voting && !hasResolvedVoting)
         {
             CastMissingVotesRandomly();
-            ResolveVotingOutcome();
+            ResolveVotingOutcome();  // This method calls ApplyAntidote internally
             hasResolvedVoting = true;
-
-            if (flowState != MeetingFlowState.Curing)
-            {
-                StartCuringPhase();
-            }
 
             return;
         }
@@ -496,6 +606,7 @@ public sealed class MeetingController : MonoBehaviour
 
             // Clear old listeners to prevent stale captures.
             button.onClick.RemoveAllListeners();
+            button.onClick = new Button.ButtonClickedEvent();
 
             bool hasTarget = i < alivePlayers.Count;
             button.gameObject.SetActive(hasTarget);
@@ -507,14 +618,22 @@ public sealed class MeetingController : MonoBehaviour
             }
 
             PlayerIdentity target = alivePlayers[i];
+            PlayerIdentity capturedTarget = target;
+            if (capturedTarget == null)
+            {
+                Debug.LogWarning($"[VOTE DEBUG] Button {button.gameObject.name} has no target at index {i}.", this);
+                continue;
+            }
+
+            string capturedName = string.IsNullOrWhiteSpace(capturedTarget.playerName) ? capturedTarget.gameObject.name : capturedTarget.playerName;
             TMP_Text label = button.GetComponentInChildren<TMP_Text>(true);
             if (label != null)
             {
-                label.text = target != null ? target.playerName : "Unknown";
+                label.text = capturedName;
             }
 
-            // Capture playerId instead of index for stable vote targeting.
-            int capturedPlayerId = target.playerId;
+            int capturedPlayerId = capturedTarget.playerId;
+            Debug.Log($"[VOTE DEBUG] Button configured: {button.gameObject.name} -> {capturedName} playerId={capturedPlayerId}", this);
             button.onClick.AddListener(() => OnVoteButtonPressedForPlayerId(capturedPlayerId));
         }
     }
@@ -564,9 +683,15 @@ public sealed class MeetingController : MonoBehaviour
 
     /// <summary>
     /// AI-controlled players and prototype non-local humans cast random votes.
+    /// Frozen players cannot vote.
     /// </summary>
     void CastAIVotes()
     {
+        if (disableAIVotesForManualTesting)
+        {
+            return;
+        }
+
         if (!enablePrototypeAIVotes)
         {
             return;
@@ -575,7 +700,7 @@ public sealed class MeetingController : MonoBehaviour
         for (int i = 0; i < alivePlayers.Count; i++)
         {
             PlayerIdentity voter = alivePlayers[i];
-            if (voter == null || !voter.isAlive)
+            if (voter == null || !voter.isAlive || voter.isFrozen)
             {
                 continue;
             }
@@ -596,7 +721,7 @@ public sealed class MeetingController : MonoBehaviour
                 continue;
             }
 
-            PlayerIdentity target = GetRandomAliveTarget();
+            PlayerIdentity target = GetRandomAliveUnfrozenTarget();
             if (target != null && target != voter)
             {
                 CastVote(voter, target);
@@ -606,13 +731,19 @@ public sealed class MeetingController : MonoBehaviour
 
     /// <summary>
     /// Players who have not voted yet cast random votes (voting deadline).
+    /// Frozen players cannot vote.
     /// </summary>
     void CastMissingVotesRandomly()
     {
+        if (disableAIVotesForManualTesting)
+        {
+            return;
+        }
+
         for (int i = 0; i < alivePlayers.Count; i++)
         {
             PlayerIdentity voter = alivePlayers[i];
-            if (voter == null || !voter.isAlive)
+            if (voter == null || !voter.isAlive || voter.isFrozen)
             {
                 continue;
             }
@@ -623,7 +754,7 @@ public sealed class MeetingController : MonoBehaviour
                 continue;
             }
 
-            PlayerIdentity target = GetRandomAliveTarget();
+            PlayerIdentity target = GetRandomAliveUnfrozenTarget();
             if (target != null && target != voter)
             {
                 CastVote(voter, target);
@@ -633,6 +764,7 @@ public sealed class MeetingController : MonoBehaviour
 
     /// <summary>
     /// Records a vote from voter for target. Prevents duplicate votes and maintains vote count.
+    /// Frozen voters and targets cannot vote or be voted for.
     /// </summary>
     void CastVote(PlayerIdentity voter, PlayerIdentity target)
     {
@@ -641,7 +773,7 @@ public sealed class MeetingController : MonoBehaviour
             return;
         }
 
-        if (!voter.isAlive || !target.isAlive)
+        if (!voter.isAlive || !target.isAlive || voter.isFrozen || target.isFrozen)
         {
             return;
         }
@@ -649,6 +781,7 @@ public sealed class MeetingController : MonoBehaviour
         // Prevent duplicate votes from same voter.
         if (playersWhoVoted.Contains(voter.playerId))
         {
+            Debug.LogWarning($"[VOTE DEBUG] {voter.playerName} already voted. Duplicate vote rejected.", this);
             return;
         }
 
@@ -664,13 +797,16 @@ public sealed class MeetingController : MonoBehaviour
         // Log vote for debugging.
         string voterName = string.IsNullOrWhiteSpace(voter.playerName) ? voter.gameObject.name : voter.playerName;
         string targetName = string.IsNullOrWhiteSpace(target.playerName) ? target.gameObject.name : target.playerName;
+        
         AgentTracePanel.Trace("VOTE", $"{voterName} voted antidote for {targetName}.");
-        Debug.Log($"{voterName} voted antidote for {targetName}.", this);
+        Debug.Log($"[VOTE DEBUG] {voterName} (playerId={voter.playerId}) -> {targetName} (playerId={target.playerId}). Vote count for target={votesByTargetPlayerId[target.playerId]}", this);
 
-        // Disable buttons after local player votes.
+        // Track local player vote.
         if (voter == localVoter)
         {
+            localVoteCast = true;
             ConfigureVoteButtons(false);
+            Debug.Log($"[VOTE DEBUG] Local player vote cast. Vote buttons disabled.", this);
         }
     }
 
@@ -681,8 +817,28 @@ public sealed class MeetingController : MonoBehaviour
             return null;
         }
 
-        int index = UnityEngine.Random. Range(0, alivePlayers.Count);
+        int index = UnityEngine.Random.Range(0, alivePlayers.Count);
         return alivePlayers[index];
+    }
+
+    PlayerIdentity GetRandomAliveUnfrozenTarget()
+    {
+        List<PlayerIdentity> unfrozen = new List<PlayerIdentity>();
+        for (int i = 0; i < alivePlayers.Count; i++)
+        {
+            if (alivePlayers[i] != null && !alivePlayers[i].isFrozen)
+            {
+                unfrozen.Add(alivePlayers[i]);
+            }
+        }
+
+        if (unfrozen.Count == 0)
+        {
+            return null;
+        }
+
+        int index = UnityEngine.Random.Range(0, unfrozen.Count);
+        return unfrozen[index];
     }
 
     /// <summary>
@@ -691,22 +847,28 @@ public sealed class MeetingController : MonoBehaviour
     void ResolveVotingOutcome()
     {
         // No votes cast = no consensus.
-        if (votesByTargetPlayerId.Count == 0)
+        if (votesByTargetPlayerId.Count == 0 || playersWhoVoted.Count == 0)
         {
-            string noConsensusMsg = "No consensus. No antidote used.";
+            string noConsensusMsg = "No antidote used.";
             AgentTracePanel.Trace("VOTE", noConsensusMsg);
-            Debug.Log(noConsensusMsg, this);
+            Debug.Log($"[VOTE DEBUG] {noConsensusMsg} No votes received.", this);
             SetResultText(noConsensusMsg);
+            HandleNoConsensus();
             return;
         }
 
+        // Debug vote summary.
+        Debug.Log($"[VOTE DEBUG] Vote tally:", this);
         int topPlayerId = -1;
-        int topVotes = -1;
+        int topVotes = 0;
         int tieCount = 0;
 
-        // Find highest vote count and detect ties.
         foreach (KeyValuePair<int, int> entry in votesByTargetPlayerId)
         {
+            PlayerIdentity player = FindPlayerById(entry.Key);
+            string playerName = player != null ? player.playerName : $"Unknown({entry.Key})";
+            Debug.Log($"[VOTE DEBUG]   {playerName} = {entry.Value} votes", this);
+
             if (entry.Value > topVotes)
             {
                 topVotes = entry.Value;
@@ -724,8 +886,9 @@ public sealed class MeetingController : MonoBehaviour
         {
             string tieMsg = "No consensus. No antidote used.";
             AgentTracePanel.Trace("VOTE", tieMsg);
-            Debug.Log(tieMsg, this);
+            Debug.Log($"[VOTE DEBUG] TIE DETECTED. {tieCount} players tied with {topVotes} votes. {tieMsg}", this);
             SetResultText(tieMsg);
+            HandleNoConsensus();
             return;
         }
 
@@ -733,90 +896,265 @@ public sealed class MeetingController : MonoBehaviour
         PlayerIdentity target = FindPlayerById(topPlayerId);
         if (target == null || !target.isAlive)
         {
-            Debug.LogWarning($"Voting winner playerId {topPlayerId} not found or dead.", this);
+            Debug.LogWarning($"[VOTE DEBUG] ERROR: Voting winner playerId {topPlayerId} not found or dead.", this);
+            HandleNoConsensus();
             return;
         }
 
+        if (target.isFrozen)
+        {
+            Debug.Log($"[VOTE DEBUG] Target {target.playerName} already frozen. Skipping antidote.", this);
+            HandleNoConsensus();
+            return;
+        }
+
+        Debug.Log($"[VOTE DEBUG] WINNER: {target.playerName} (playerId={topPlayerId}) with {topVotes} votes.", this);
         ApplyAntidote(target);
     }
 
     /// <summary>
-    /// Applies antidote to target: cures if infected, otherwise no effect.
-    /// Does NOT kill, eliminate, or disable any player.
+    /// Handles case where no antidote is used (tie or no votes).
+    /// Finalizes meeting immediately.
+    /// </summary>
+    void HandleNoConsensus()
+    {
+        flowState = MeetingFlowState.Curing;
+        FinalizeMeetingFlow();
+
+        if (autoAdvanceGameManagerPhases && gameManager != null && GameManager.CurrentPhase == GamePhase.Voting)
+        {
+            gameManager.EnterExploration();
+        }
+    }
+
+    /// <summary>
+    /// Starts antidote freeze sequence for target. Public messaging does NOT reveal role.
+    /// CRITICAL: This must apply to the VOTED target, not always Player 1.
     /// </summary>
     void ApplyAntidote(PlayerIdentity target)
     {
-        if (target == null)
+        if (target == null || !target.isAlive)
         {
+            Debug.LogWarning("[ANTIDOTE] ApplyAntidote called with null or dead target.", this);
             return;
         }
 
-        if (!target.isAlive)
+        // Stop any existing antidote routine
+        if (activeAntidoteRoutine != null)
         {
-            return;
+            StopCoroutine(activeAntidoteRoutine);
+            Debug.LogWarning($"[ANTIDOTE] Stopping previous antidote routine for {currentAntidoteTarget.playerName}", this);
         }
+
+        currentAntidoteTarget = target;
 
         string playerName = string.IsNullOrWhiteSpace(target.playerName) ? target.gameObject.name : target.playerName;
-        bool wasInfected = target.isInfected;
+        string antidoteMsg = $"ANTIDOTE ADMINISTERED TO {playerName}";
+        SetResultText(antidoteMsg);
+        AgentTracePanel.Trace("VOTE", $"Antidote administered to {playerName}.");
+        Debug.Log($"[ANTIDOTE] Antidote applied to {playerName} (playerId={target.playerId}). Starting 10-second freeze.", this);
 
-        if (wasInfected)
+        activeAntidoteRoutine = StartCoroutine(AntidoteFreezeRoutine(target));
+    }
+
+    /// <summary>
+    /// Freezes target for exactly 10 seconds, resolves cure silently, then unfreezes.
+    /// Shows personal overlay ONLY if target is local player.
+    /// </summary>
+    IEnumerator AntidoteFreezeRoutine(PlayerIdentity target)
+    {
+        if (target == null || !target.isAlive)
         {
-            // Cure the infected player via InfectionSystem if available.
+            yield break;
+        }
+
+        flowState = MeetingFlowState.Curing;
+        bool isLocalTarget = IsLocalTarget(target);
+
+        target.FreezePlayer();
+        Debug.Log($"[ANTIDOTE] {target.playerName} frozen. duration=10 seconds. isLocalTarget={isLocalTarget}", this);
+
+        if (isLocalTarget)
+        {
+            ShowPersonalAntidoteOverlay(target);
+        }
+
+        float elapsedTime = 0f;
+        float freezeDuration = antidoteFreezeDuration;
+
+        while (elapsedTime < freezeDuration)
+        {
+            elapsedTime += Time.deltaTime;
+            float remaining = Mathf.Max(0f, freezeDuration - elapsedTime);
+
+            if (isLocalTarget)
+            {
+                UpdatePersonalAntidoteCountdown(remaining);
+            }
+
+            yield return null;
+        }
+
+        if (target != null && target.isAlive)
+        {
+            Debug.Log($"[ANTIDOTE] {target.playerName} freeze complete. Resolving cure silently.", this);
+            ResolveCureSilently(target);
+            target.UnfreezePlayer();
+            Debug.Log($"[ANTIDOTE] {target.playerName} unfrozen.", this);
+        }
+
+        if (isLocalTarget)
+        {
+            HidePersonalAntidoteOverlay();
+        }
+
+        currentAntidoteTarget = null;
+        activeAntidoteRoutine = null;
+
+        // Trigger loss condition check after unfreeze.
+        if (GameEndManager.Instance != null)
+        {
+            GameEndManager.Instance.CheckLoseConditions();
+        }
+
+        // Finalize meeting flow after antidote is complete
+        FinalizeMeetingFlow();
+
+        if (autoAdvanceGameManagerPhases && gameManager != null && GameManager.CurrentPhase == GamePhase.Voting)
+        {
+            gameManager.EnterExploration();
+        }
+    }
+
+    /// <summary>
+    /// Cures target silently if eligible. Does NOT show public messages about role or cure.
+    /// </summary>
+    void ResolveCureSilently(PlayerIdentity target)
+    {
+        if (target == null || !target.isAlive)
+        {
+            return;
+        }
+
+        if (!CanBeCured(target))
+        {
+            return;
+        }
+
+        bool wasCured = false;
+
+        // Cure silently: no public message.
+        if (target.isInfected)
+        {
             if (InfectionSystem.Instance != null)
             {
                 InfectionSystem.Instance.ApplyAntidote(target);
             }
             else
             {
-                // Fallback: directly cure if InfectionSystem unavailable.
                 target.Cure();
             }
 
-            string curedMsg = $"{playerName} was infected and was cured.";
-            AgentTracePanel.Trace("VOTE", $"{target.playerName} was infected and cured by antidote.");
-            Debug.Log(curedMsg, target);
-            SetResultText(curedMsg);
-        }
-        else
-        {
-            // Target is human: no effect, but remain alive and unaffected.
-            string humanMsg = $"{playerName} was human. Antidote had no effect.";
-            AgentTracePanel.Trace("VOTE", $"{target.playerName} was human. Antidote had no effect.");
-            Debug.Log(humanMsg, target);
-            SetResultText(humanMsg);
+            wasCured = true;
+            Debug.Log($"[ANTIDOTE DEBUG] {target.playerName} was infected and was cured silently.", this);
         }
 
-        // Trigger GameEndManager loss condition check if present.
-        if (GameEndManager.Instance != null)
+        // Use showPrivateAntidoteDebugTrace to conditionally show private debug info
+        if (showPrivateAntidoteDebugTrace)  // ← Used here as a guard for private debug trace
         {
-            GameEndManager.Instance.CheckLoseConditions();
+            string targetName = string.IsNullOrWhiteSpace(target.playerName) ? target.gameObject.name : target.playerName;
+            AgentTracePanel.Trace("VOTE_DEBUG", $"{targetName} antidote resolved privately. cured={wasCured}");
         }
     }
 
-    void StartCuringPhase()
+    /// <summary>
+    /// Returns true if target can be cured by antidote.
+    /// </summary>
+    private bool CanBeCured(PlayerIdentity target)
     {
-        flowState = MeetingFlowState.Curing;
+        return target != null && target.isInfected;
+    }
 
-        float freezeDuration = curingDuration;
-        if (InfectionSystem.Instance != null)
+    /// <summary>
+    /// Returns true if target is the local player.
+    /// </summary>
+    private bool IsLocalTarget(PlayerIdentity target)
+    {
+        return target != null && target.isLocalPlayer;
+    }
+
+    /// <summary>
+    /// Shows personal antidote/curing overlay ONLY for local player targets.
+    /// </summary>
+    void ShowPersonalAntidoteOverlay(PlayerIdentity target)
+    {
+        if (target == null || !IsLocalTarget(target))
         {
-            freezeDuration = InfectionSystem.Instance.AntidoteFreezeDuration;
+            return;
         }
 
-        phaseTimer = freezeDuration;
-
-        if (gameManager != null)
+        if (personalAntidotePanel == null)
         {
-            gameManager.AddPhaseTime(freezeDuration);
+            if (!personalAntidotePanelMissingWarningLogged)
+            {
+                personalAntidotePanelMissingWarningLogged = true;
+                Debug.LogWarning("[ANTIDOTE UI] personalAntidotePanel not assigned. Cannot show personal overlay.", this);
+            }
+
+            return;
         }
 
-        if (meetingPanel != null)
+        personalAntidotePanel.SetActive(true);
+
+        if (personalAntidoteText != null)
         {
-            meetingPanel.SetActive(true);
+            personalAntidoteText.text = "ANTIDOTE ADMINISTERED\nPLEASE WAIT";
         }
 
-        ConfigureVoteButtons(false);
-        UpdateTimerText();
+        if (personalAntidoteTimerText != null)
+        {
+            personalAntidoteTimerText.text = Mathf.CeilToInt(antidoteFreezeDuration).ToString();
+        }
+
+        Debug.Log($"[ANTIDOTE UI] Personal antidote overlay shown for {target.playerName}.", this);
+    }
+
+    /// <summary>
+    /// Hides personal antidote/curing overlay.
+    /// </summary>
+    void HidePersonalAntidoteOverlay()
+    {
+        if (personalAntidotePanel != null)
+        {
+            bool wasActive = personalAntidotePanel.activeSelf;
+            personalAntidotePanel.SetActive(false);
+
+            if (wasActive)
+            {
+                Debug.Log("[ANTIDOTE UI] Personal antidote overlay hidden.", this);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Updates the countdown timer on personal antidote overlay.
+    /// </summary>
+    void UpdatePersonalAntidoteCountdown(float remainingSeconds)
+    {
+        if (personalAntidotePanel == null || !personalAntidotePanel.activeInHierarchy)
+        {
+            return;
+        }
+
+        if (currentAntidoteTarget == null || !currentAntidoteTarget.isLocalPlayer || !currentAntidoteTarget.isAlive)
+        {
+            return;
+        }
+
+        if (personalAntidoteTimerText != null)
+        {
+            personalAntidoteTimerText.text = Mathf.CeilToInt(remainingSeconds).ToString();
+        }
     }
 
     PlayerIdentity FindPlayerById(int playerId)

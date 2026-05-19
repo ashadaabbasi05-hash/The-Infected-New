@@ -259,11 +259,22 @@ public sealed class ObjectiveHUDController : MonoBehaviour
         }
 
         int remainingTasks = taskManager.RemainingTasks;
-        bool allTasksComplete = taskManager.TotalTasks > 0 && remainingTasks <= 0;
+        bool allTasksComplete = taskManager.AreAllTasksCompleted;
+        bool exitScanReady = taskManager.IsExitScanUnlocked && !allTasksComplete;
+        TaskInteractable currentTask = TaskInteractable.CurrentLocalInteractable;
+        bool isScanningExit = currentTask != null && currentTask.IsExitScanTask && currentTask.IsScanningExit;
 
-        if (allTasksComplete)
+        if (isScanningExit)
+        {
+            SetTopRightText("SCANNING EXIT...");
+        }
+        else if (allTasksComplete)
         {
             SetTopRightText("ESCAPE DOOR OPEN\nRUN TO THE EXIT");
+        }
+        else if (exitScanReady)
+        {
+            SetTopRightText("EXIT SCAN READY\nGO TO EXIT GATE");
         }
         else if (isFinalHuntActive)
         {

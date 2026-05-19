@@ -5,6 +5,8 @@ using UnityEngine.UI;
 [DisallowMultipleComponent]
 public sealed class MobileActionButtonsController : MonoBehaviour
 {
+    public static MobileActionButtonsController Instance { get; private set; }
+
     [Header("Buttons")]
     [SerializeField] public Button interactButton;
     [SerializeField] public Button traceButton;
@@ -26,13 +28,27 @@ public sealed class MobileActionButtonsController : MonoBehaviour
     [SerializeField] public bool autoFindReferences = true;
     [SerializeField] public bool enableDebugLogs = true;
 
+    public bool IsInteractHeld { get; private set; }
+
     bool warnedMissingInteract;
     bool warnedMissingTrace;
     bool warnedMissingHelp;
     bool warnedMissingFinalHunt;
+    bool suppressNextInteractClick;
+    int interactPressSequence;
+    int suppressClickSequence = -1;
 
     void Awake()
     {
+        if (Instance != null && Instance != this)
+        {
+            Instance = this;
+        }
+        else
+        {
+            Instance = this;
+        }
+
         if (autoFindReferences)
         {
             AutoFindReferences();
@@ -40,6 +56,14 @@ public sealed class MobileActionButtonsController : MonoBehaviour
 
         SetupButtonLabels();
         SetupListeners();
+    }
+
+    void OnDestroy()
+    {
+        if (Instance == this)
+        {
+            Instance = null;
+        }
     }
 
     void AutoFindReferences()
@@ -119,6 +143,7 @@ public sealed class MobileActionButtonsController : MonoBehaviour
             interactButton.onClick.RemoveAllListeners();
             interactButton.onClick.AddListener(HandleInteractPressed);
             interactButton.gameObject.SetActive(true);
+            EnsureInteractHoldHandler();
         }
         else if (!warnedMissingInteract)
         {
@@ -165,6 +190,19 @@ public sealed class MobileActionButtonsController : MonoBehaviour
 
     void HandleInteractPressed()
     {
+        if (suppressNextInteractClick && suppressClickSequence == interactPressSequence)
+        {
+            suppressNextInteractClick = false;
+            suppressClickSequence = -1;
+            return;
+        }
+
+        TaskInteractable currentInteractable = TaskInteractable.CurrentLocalInteractable;
+        if (currentInteractable != null && currentInteractable.IsExitScanTask)
+        {
+            return;
+        }
+
         bool interacted = false;
 
         // Priority: Task then Door
@@ -183,6 +221,53 @@ public sealed class MobileActionButtonsController : MonoBehaviour
         }
     }
 
+    public void HandleInteractButtonDown()
+    {
+        IsInteractHeld = true;
+        interactPressSequence++;
+
+        TaskInteractable currentInteractable = TaskInteractable.CurrentLocalInteractable;
+        if (currentInteractable != null)
+        {
+            if (currentInteractable.IsExitScanTask)
+            {
+                currentInteractable.StartHoldInteract();
+                return;
+            }
+
+            suppressNextInteractClick = true;
+            suppressClickSequence = interactPressSequence;
+            currentInteractable.StartHoldInteract();
+        }
+    }
+
+    public void HandleInteractButtonUp()
+    {
+        IsInteractHeld = false;
+
+        TaskInteractable currentInteractable = TaskInteractable.CurrentLocalInteractable;
+        if (currentInteractable != null && currentInteractable.IsExitScanTask)
+        {
+            currentInteractable.StopHoldInteract();
+        }
+    }
+
+    void EnsureInteractHoldHandler()
+    {
+        if (interactButton == null)
+        {
+            return;
+        }
+
+        MobileButtonHoldHandler holdHandler = interactButton.GetComponent<MobileButtonHoldHandler>();
+        if (holdHandler == null)
+        {
+            holdHandler = interactButton.gameObject.AddComponent<MobileButtonHoldHandler>();
+        }
+
+        holdHandler.SetController(this);
+    }
+
     void HandleTracePressed()
     {
         AgentTracePanel panel = agentTracePanel ?? AgentTracePanel.Instance ?? FindAnyObjectByType<AgentTracePanel>(FindObjectsInactive.Include);
@@ -191,12 +276,6 @@ public sealed class MobileActionButtonsController : MonoBehaviour
             panel.TogglePanel();
             Debug.Log("[MOBILE BUTTONS] TRACE pressed.");
             return;
-        }
-
-        if (!warnedMissingTrace)
-        {
-            warnedMissingTrace = true;
-            Debug.LogWarning("[MOBILE BUTTONS] AgentTracePanel not found for TRACE button.");
         }
     }
 
@@ -216,12 +295,6 @@ public sealed class MobileActionButtonsController : MonoBehaviour
             demoHelpPanel.TogglePanel();
             Debug.Log("[MOBILE BUTTONS] HELP pressed.");
             return;
-        }
-
-        if (!warnedMissingHelp)
-        {
-            warnedMissingHelp = true;
-            Debug.LogWarning("[MOBILE BUTTONS] DemoHelpPanel not found for HELP button.");
         }
     }
 

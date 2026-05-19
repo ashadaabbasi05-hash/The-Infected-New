@@ -29,6 +29,10 @@ public sealed class PlayerIdentity : MonoBehaviour
     [field: SerializeField]
     public bool isAIControlled { get; private set; }
 
+    [field: Tooltip("True when the player is frozen by antidote.")]
+    [field: SerializeField]
+    public bool isFrozen { get; private set; }
+
     [Header("Visuals")]
     [Tooltip("If true, the SpriteRenderer's color on Awake becomes the normalColor. Otherwise, normalColor is white.")]
     [SerializeField] bool useOriginalColorAsNormal = true;
@@ -164,8 +168,32 @@ public sealed class PlayerIdentity : MonoBehaviour
 
     void ApplyControlState()
     {
-        SetMovementEnabled(isAlive && isLocalPlayer && !isAIControlled);
-        SetBotMovementEnabled(isAlive && isAIControlled);
+        SetMovementEnabled(isAlive && isLocalPlayer && !isAIControlled && !isFrozen);
+        SetBotMovementEnabled(isAlive && isAIControlled && !isFrozen);
+    }
+
+    public void FreezePlayer()
+    {
+        if (isFrozen)
+        {
+            return;
+        }
+
+        isFrozen = true;
+        ApplyControlState();
+        Debug.Log($"[ANTIDOTE] {GetDisplayName()} frozen.", this);
+    }
+
+    public void UnfreezePlayer()
+    {
+        if (!isFrozen)
+        {
+            return;
+        }
+
+        isFrozen = false;
+        ApplyControlState();
+        Debug.Log($"[ANTIDOTE] {GetDisplayName()} unfrozen.", this);
     }
 
     string GetDisplayName()
