@@ -489,6 +489,11 @@ public sealed class InfectionSystem : MonoBehaviour
         ApplyBotTakeover(target, wave);
         UpdateAllBotModesForWave(wave);
 
+        if (BotDecisionDirector.Instance != null)
+        {
+            BotDecisionDirector.Instance.RequestImmediateDecision(target);
+        }
+
         currentInfectedPlayer = target;
 
         Debug.Log($"[INFECT DEBUG] INFECTED: {GetPlayerName(target)} on wave {wave}. Reason: {reason}", target);
