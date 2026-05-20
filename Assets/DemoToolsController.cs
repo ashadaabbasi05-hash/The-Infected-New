@@ -205,6 +205,12 @@ public sealed class DemoToolsController : MonoBehaviour
             InvokeOptional(finalHuntManager, "ResetFinalHuntForDemo", null);
         }
 
+        MeetingController meetingController = FindAnyObjectByType<MeetingController>(FindObjectsInactive.Include);
+        if (meetingController != null)
+        {
+            InvokeOptional(meetingController, "ResetMeetingForDemo", null);
+        }
+
         ObjectiveHUDController objectiveHudController = FindAnyObjectByType<ObjectiveHUDController>(FindObjectsInactive.Include);
         if (objectiveHudController != null)
         {
@@ -339,17 +345,29 @@ public sealed class DemoToolsController : MonoBehaviour
 
         Log("Force meeting/voting requested.");
 
-        bool invoked =
-            InvokeOptionalOnAny("GameManager", "EnterMeeting") ||
-            InvokeOptionalOnAny("MeetingController", "StartMeeting") ||
-            InvokeOptionalOnAny("MeetingController", "StartVoting");
+        MeetingController meetingController = FindAnyObjectByType<MeetingController>(FindObjectsInactive.Include);
+        bool invoked = false;
+
+        if (meetingController != null)
+        {
+            invoked = InvokeOptional(meetingController, "StartMeeting", null);
+            if (invoked)
+            {
+                Trace("DEMO", "Meeting flow forced through MeetingController.");
+                return;
+            }
+        }
+
+        GameManager gameManager = GameManager.Instance != null ? GameManager.Instance : FindAnyObjectByType<GameManager>(FindObjectsInactive.Include);
+        if (gameManager != null)
+        {
+            invoked = InvokeOptional(gameManager, "EnterMeeting", null);
+        }
 
         if (!invoked)
         {
             Debug.LogWarning("[DEMO] No safe meeting/voting method found.", this);
         }
-
-        Trace("DEMO", "Meeting/voting forced.");
     }
 
     public void DemoCompleteAllTasks()

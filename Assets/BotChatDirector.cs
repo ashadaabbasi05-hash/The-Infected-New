@@ -138,10 +138,7 @@ public class BotChatDirector : MonoBehaviour
                 chatCanvasGroup.interactable = false;
                 chatCanvasGroup.alpha = 0f;
             }
-            else
-            {
-                chatPanelRoot.SetActive(false);
-            }
+            chatPanelRoot.SetActive(false);
         }
     }
 

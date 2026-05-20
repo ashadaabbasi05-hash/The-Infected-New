@@ -64,10 +64,15 @@ public sealed class MeetingController : MonoBehaviour
     readonly Dictionary<int, int> votesByVoterId = new Dictionary<int, int>(4);
     readonly HashSet<int> playersWhoVoted = new HashSet<int>();
 
+    bool meetingActive;
+    bool votingActive;
+    Coroutine meetingRoutine;
+    Coroutine votingRoutine;
     MeetingFlowState flowState = MeetingFlowState.Idle;
     float phaseTimer;
     bool votingResolved;
     bool localVoteCast;
+    bool meetingHiddenDuringVotingLogged;
     bool personalAntidotePanelMissingWarningLogged;
     bool personalAntidoteUiWiredLogged;
 
@@ -76,6 +81,7 @@ public sealed class MeetingController : MonoBehaviour
     PlayerIdentity activePersonalAntidoteTarget;
     Coroutine activeAntidoteRoutine;
     bool personalAntidoteOverlayHiddenLogged;
+    bool voteButtonHierarchyWarningLogged;
 
     void Awake()
     {
@@ -112,6 +118,9 @@ public sealed class MeetingController : MonoBehaviour
         AutoAssignPublicAntidoteReferences();
         EnsurePublicAntidoteStatusUi();
         LogLocalPlayerStrict("Start");
+
+        Debug.Log("[MEETING DEBUG] meetingPanel ref=" + (meetingPanel != null ? meetingPanel.name : "NULL"), this);
+        Debug.Log("[MEETING DEBUG] votingPanel ref=" + (votingPanel != null ? votingPanel.name : "NULL"), this);
 
         if (gameManager == null)
         {
@@ -160,7 +169,22 @@ public sealed class MeetingController : MonoBehaviour
     {
         HandleDebugHotkeys();
 
+        if (votingActive && meetingPanel != null && meetingPanel.activeSelf)
+        {
+            ForceHideMeetingPanelForVoting();
+            if (!meetingHiddenDuringVotingLogged)
+            {
+                meetingHiddenDuringVotingLogged = true;
+                Debug.LogWarning("[MEETING DEBUG] MeetingPanel was active during voting. Forced hidden.", this);
+            }
+        }
+
         if (flowState == MeetingFlowState.Idle)
+        {
+            return;
+        }
+
+        if (flowState != MeetingFlowState.Curing)
         {
             return;
         }
@@ -211,21 +235,34 @@ public sealed class MeetingController : MonoBehaviour
 
     public void StartMeeting()
     {
-        RefreshAlivePlayers();
+        if (IsFinalHuntActive())
+        {
+            HideMeetingAndVotingUi();
+            return;
+        }
 
+        if (meetingActive && flowState == MeetingFlowState.Discussion)
+        {
+            return;
+        }
+
+        StopMeetingAndVotingCoroutines();
+
+        RefreshAlivePlayers();
+        votesByVoterId.Clear();
+        playersWhoVoted.Clear();
+        votingResolved = false;
+        localVoteCast = false;
+        meetingActive = true;
+        votingActive = false;
         flowState = MeetingFlowState.Discussion;
         phaseTimer = discussionDuration;
-        votingResolved = false;
         activeAntidoteTarget = null;
 
         localVoter = GetLocalPlayerStrict();
 
-        if (meetingPanel != null)
-        {
-            meetingPanel.SetActive(true);
-        }
-
-        // Show meeting chat UI if present
+        ShowMeetingUi();
+        HideVotingUiOnly();
         BotChatDirector.Instance?.ShowChat();
 
         ApplyMeetingVotingMovementLock();
@@ -233,19 +270,39 @@ public sealed class MeetingController : MonoBehaviour
         ConfigureVoteButtons(false);
         ClearResultText();
         HidePersonalAntidoteOverlay();
+        HidePublicAntidoteStatus();
         UpdateTimerText();
 
-        Debug.Log("Meeting started.", this);
+        Debug.Log($"[MEETING DEBUG] Meeting started. duration={discussionDuration:0.0}", this);
+
+        meetingRoutine = StartCoroutine(MeetingCountdownRoutine());
+
+        if (autoAdvanceGameManagerPhases && gameManager != null && GameManager.CurrentPhase != GamePhase.Meeting)
+        {
+            gameManager.EnterMeeting();
+        }
+
     }
 
     public void StartVoting()
     {
-        if (flowState == MeetingFlowState.Voting)
+        if (IsFinalHuntActive())
+        {
+            HideMeetingAndVotingUi();
+            return;
+        }
+
+        if (votingActive && flowState == MeetingFlowState.Voting)
         {
             return;
         }
 
-        AgentTracePanel.Trace("MEETING", "Voting started. Antidote target selection active.");
+        StopMeetingAndVotingCoroutines();
+
+        if (meetingActive)
+        {
+            Debug.Log("[MEETING DEBUG] Meeting timer ended. Starting voting.", this);
+        }
 
         RefreshAlivePlayers();
 
@@ -254,22 +311,23 @@ public sealed class MeetingController : MonoBehaviour
         localVoteCast = false;
         votingResolved = false;
         activeAntidoteTarget = null;
-        HidePersonalAntidoteOverlay();
-        HidePublicAntidoteStatus();
-
+        meetingActive = false;
+        votingActive = true;
         flowState = MeetingFlowState.Voting;
         phaseTimer = votingDuration;
+
+        HidePersonalAntidoteOverlay();
+        HidePublicAntidoteStatus();
 
         localVoter = GetLocalPlayerStrict();
         LogLocalPlayerStrict("StartVoting");
 
-        if (meetingPanel != null)
-        {
-            meetingPanel.SetActive(true);
-        }
+        ForceHideMeetingPanelForVoting();
+        ShowVotingUi();
 
         EnsureVoteButtonsSortedBySlot();
         ConfigureVoteButtons(true);
+        SetVoteButtonsInteractable(true);
 
         if (disableAIVotesForManualTesting)
         {
@@ -281,10 +339,18 @@ public sealed class MeetingController : MonoBehaviour
         }
 
         UpdateTimerText();
+        Debug.Log("[MEETING DEBUG] Voting buttons configured.", this);
+
+        votingRoutine = StartCoroutine(VotingCountdownRoutine());
+
+        if (autoAdvanceGameManagerPhases && gameManager != null && GameManager.CurrentPhase != GamePhase.Voting)
+        {
+            gameManager.EnterVoting();
+        }
 
         int eligibleVoters = CountEligibleVoters();
         Debug.Log($"[VOTE DEBUG] Voting started. Eligible voters={eligibleVoters}", this);
-        Debug.Log("[VOTE DEBUG] Vote buttons configured.", this);
+        Debug.Log("[MEETING DEBUG] Voting started. duration=" + votingDuration.ToString("0.0"), this);
     }
 
     public void EndVoting()
@@ -296,9 +362,41 @@ public sealed class MeetingController : MonoBehaviour
 
         if (!votingResolved && flowState == MeetingFlowState.Voting)
         {
+            StopVotingRoutineIfNeeded();
+            Debug.Log("[MEETING DEBUG] Voting ended. Resolving.", this);
             CastMissingVotesRandomly();
             ResolveVotingOutcome();
         }
+    }
+
+    public void ResetMeetingForDemo()
+    {
+        StopMeetingAndVotingCoroutines();
+        StopVotingRoutineIfNeeded();
+        StopActiveAntidoteRoutineIfNeeded();
+
+        meetingActive = false;
+        votingActive = false;
+        votingResolved = false;
+        localVoteCast = false;
+        flowState = MeetingFlowState.Idle;
+        phaseTimer = 0f;
+        votesByVoterId.Clear();
+        playersWhoVoted.Clear();
+        activeAntidoteTarget = null;
+
+        HideAllMeetingVotingAntidoteUi("demo reset");
+        HideMeetingAndVotingUi();
+        ClearResultText();
+
+        if (BotChatDirector.Instance != null)
+        {
+            BotChatDirector.Instance.HideChat();
+        }
+
+        RestoreMovementAfterMeeting();
+
+        Debug.Log("[MEETING DEBUG] Reset for demo.", this);
     }
 
     void OnVoteButtonPressedForPlayerId(int targetPlayerId)
@@ -831,6 +929,7 @@ public sealed class MeetingController : MonoBehaviour
 
         if (flowState != MeetingFlowState.Idle)
         {
+            HideAllMeetingVotingAntidoteUi("phase changed to exploration");
             FinalizeMeetingFlow();
         }
     }
@@ -884,6 +983,12 @@ public sealed class MeetingController : MonoBehaviour
                 }
 
                 continue;
+            }
+
+            if (button.transform.IsChildOf(meetingPanel != null ? meetingPanel.transform : button.transform.parent) && !voteButtonHierarchyWarningLogged)
+            {
+                voteButtonHierarchyWarningLogged = true;
+                Debug.LogWarning("[MEETING DEBUG] Vote button is child of MeetingPanel. It may be hidden when MeetingPanel is hidden.", this);
             }
 
             string labelText = GetVoteButtonLabel(target, expectedPlayerId);
@@ -1461,6 +1566,7 @@ public sealed class MeetingController : MonoBehaviour
         }
 
         votingResolved = true;
+        votingActive = false;
         SetVoteButtonsInteractable(false);
         ClearResultText();
 
@@ -1558,8 +1664,11 @@ public sealed class MeetingController : MonoBehaviour
 
     void EndVotingWithoutAntidote()
     {
+        votingActive = false;
+        votingResolved = true;
         flowState = MeetingFlowState.Curing;
         phaseTimer = 0f;
+        HideAllMeetingVotingAntidoteUi("no antidote / tie");
         Debug.Log("[MOVE LOCK] Voting resolved with no antidote. Restoring non-frozen players.", this);
         RestoreControlForNonFrozenPlayersAfterVoting();
         FinalizeMeetingFlow();
@@ -1578,6 +1687,7 @@ public sealed class MeetingController : MonoBehaviour
         StopActiveAntidoteRoutineIfNeeded();
 
         activeAntidoteTarget = target;
+        votingActive = false;
         flowState = MeetingFlowState.Curing;
         phaseTimer = antidoteFreezeDuration;
 
@@ -1679,8 +1789,8 @@ public sealed class MeetingController : MonoBehaviour
             Debug.Log($"[ANTIDOTE] Freeze ended for {targetName}", this);
         }
 
-        HidePersonalAntidoteOverlay();
-        HidePublicAntidoteStatus();
+        HideAllMeetingVotingAntidoteUi("antidote sequence complete");
+        RestoreControlForNonFrozenPlayersAfterVoting();
 
         activeAntidoteTarget = null;
         activeAntidoteRoutine = null;
@@ -1855,12 +1965,12 @@ public sealed class MeetingController : MonoBehaviour
             return;
         }
 
+        meetingActive = false;
+        votingActive = false;
         flowState = MeetingFlowState.Idle;
+        StopMeetingAndVotingCoroutines();
 
-        if (meetingPanel != null)
-        {
-            meetingPanel.SetActive(false);
-        }
+        HideMeetingAndVotingUi();
 
         if (timerText != null)
         {
@@ -2037,6 +2147,334 @@ public sealed class MeetingController : MonoBehaviour
             int targetPlayerId = slot + 1;
             OnVoteButtonPressedForPlayerId(targetPlayerId);
         }
+    }
+
+    IEnumerator MeetingCountdownRoutine()
+    {
+        float remaining = discussionDuration;
+
+        while (meetingActive && flowState == MeetingFlowState.Discussion)
+        {
+            phaseTimer = remaining;
+            UpdateTimerText();
+
+            if (remaining <= 0f)
+            {
+                break;
+            }
+
+            remaining -= Time.deltaTime;
+            if (remaining < 0f)
+            {
+                remaining = 0f;
+            }
+
+            yield return null;
+        }
+
+        meetingRoutine = null;
+
+        if (meetingActive && flowState == MeetingFlowState.Discussion && !IsFinalHuntActive())
+        {
+            phaseTimer = 0f;
+            Debug.Log("[MEETING DEBUG] Meeting timer ended. Starting voting.", this);
+            StartVoting();
+        }
+    }
+
+    IEnumerator VotingCountdownRoutine()
+    {
+        float remaining = votingDuration;
+
+        while (votingActive && flowState == MeetingFlowState.Voting && !votingResolved)
+        {
+            phaseTimer = remaining;
+            UpdateTimerText();
+
+            if (remaining <= 0f)
+            {
+                break;
+            }
+
+            remaining -= Time.deltaTime;
+            if (remaining < 0f)
+            {
+                remaining = 0f;
+            }
+
+            yield return null;
+        }
+
+        votingRoutine = null;
+
+        if (votingActive && !votingResolved && flowState == MeetingFlowState.Voting && !IsFinalHuntActive())
+        {
+            phaseTimer = 0f;
+            Debug.Log("[MEETING DEBUG] Voting ended. Resolving.", this);
+            ResolveVotingOutcome();
+        }
+    }
+
+    void StopMeetingAndVotingCoroutines()
+    {
+        if (meetingRoutine != null)
+        {
+            StopCoroutine(meetingRoutine);
+            meetingRoutine = null;
+        }
+
+        StopVotingRoutineIfNeeded();
+    }
+
+    void StopVotingRoutineIfNeeded()
+    {
+        if (votingRoutine == null)
+        {
+            return;
+        }
+
+        StopCoroutine(votingRoutine);
+        votingRoutine = null;
+    }
+
+    void ShowMeetingUi()
+    {
+        if (meetingPanel != null)
+        {
+            meetingPanel.SetActive(true);
+            CanvasGroup group = meetingPanel.GetComponent<CanvasGroup>();
+            if (group != null)
+            {
+                group.alpha = 1f;
+                group.interactable = true;
+                group.blocksRaycasts = true;
+            }
+        }
+    }
+
+    void HideVotingUiOnly()
+    {
+        if (votingPanel != null)
+        {
+            votingPanel.SetActive(false);
+            CanvasGroup group = votingPanel.GetComponent<CanvasGroup>();
+            if (group != null)
+            {
+                group.alpha = 0f;
+                group.interactable = false;
+                group.blocksRaycasts = false;
+            }
+        }
+
+        SetVoteButtonsInteractable(false);
+    }
+
+    void ShowVotingUi()
+    {
+        if (votingPanel != null)
+        {
+            votingPanel.SetActive(true);
+            votingPanel.transform.SetAsLastSibling();
+            CanvasGroup group = votingPanel.GetComponent<CanvasGroup>();
+            if (group != null)
+            {
+                group.alpha = 1f;
+                group.interactable = true;
+                group.blocksRaycasts = true;
+            }
+        }
+
+        // Ensure meeting panel is non-blocking. Prefer the force-hide helper when necessary.
+        if (meetingPanel != null)
+        {
+            CanvasGroup group = meetingPanel.GetComponent<CanvasGroup>();
+            if (group != null)
+            {
+                group.interactable = false;
+                group.blocksRaycasts = false;
+                if (!AreVoteButtonsChildrenOfMeetingPanel())
+                {
+                    group.alpha = 0f;
+                    meetingPanel.SetActive(false);
+                }
+            }
+        }
+
+        foreach (Button voteButton in voteButtons)
+        {
+            if (voteButton == null)
+                continue;
+
+            voteButton.gameObject.SetActive(true);
+            voteButton.interactable = true;
+            voteButton.transform.SetAsLastSibling();
+        }
+
+        Debug.Log("[MEETING DEBUG] Voting UI shown and moved to top.", this);
+    }
+
+    void HideMeetingUiForVoting()
+    {
+        if (meetingPanel == null)
+        {
+            return;
+        }
+
+        CanvasGroup group = meetingPanel.GetComponent<CanvasGroup>();
+        if (group != null)
+        {
+            group.interactable = false;
+            group.blocksRaycasts = false;
+            group.alpha = 1f;
+        }
+
+        if (!AreVoteButtonsChildrenOfMeetingPanel())
+        {
+            meetingPanel.SetActive(false);
+        }
+    }
+
+    private void ForceHideMeetingPanelForVoting()
+    {
+        HidePanelNonBlocking(meetingPanel, "meetingPanel reference");
+
+        GameObject exactMeetingPanel = GameObject.Find("MeetingPanel");
+        if (exactMeetingPanel != null)
+            HidePanelNonBlocking(exactMeetingPanel, "MeetingPanel exact-name");
+
+        GameObject meetingTimer = GameObject.Find("MeetingTimer");
+        if (meetingTimer != null)
+            meetingTimer.SetActive(false);
+
+        GameObject meetingText = GameObject.Find("MeetingText");
+        if (meetingText != null)
+            meetingText.SetActive(false);
+
+        GameObject newText = GameObject.Find("New Text");
+        if (newText != null && exactMeetingPanel != null && newText.transform.IsChildOf(exactMeetingPanel.transform))
+            newText.SetActive(false);
+
+        Debug.Log("[MEETING DEBUG] Meeting UI force-hidden for voting.", this);
+    }
+
+    private void HidePanelNonBlocking(GameObject panel, string label)
+    {
+        if (panel == null)
+            return;
+
+        CanvasGroup group = panel.GetComponent<CanvasGroup>();
+        if (group != null)
+        {
+            group.alpha = 0f;
+            group.interactable = false;
+            group.blocksRaycasts = false;
+        }
+
+        Image[] images = panel.GetComponentsInChildren<Image>(true);
+        foreach (Image image in images)
+        {
+            if (image != null)
+                image.raycastTarget = false;
+        }
+
+        TMP_Text[] texts = panel.GetComponentsInChildren<TMP_Text>(true);
+        foreach (TMP_Text text in texts)
+        {
+            if (text != null)
+                text.raycastTarget = false;
+        }
+
+        panel.SetActive(false);
+
+        Debug.Log($"[MEETING DEBUG] Hidden {label}: {panel.name}", this);
+    }
+
+    private void HideGameObjectByExactName(string objectName)
+    {
+        GameObject go = GameObject.Find(objectName);
+        if (go == null)
+            return;
+
+        HidePanelNonBlocking(go, objectName);
+    }
+
+    private void HideAllMeetingVotingAntidoteUi(string reason)
+    {
+        HidePanelNonBlocking(meetingPanel, "meetingPanel");
+        HidePanelNonBlocking(votingPanel, "votingPanel");
+
+        HideGameObjectByExactName("MeetingPanel");
+        HideGameObjectByExactName("VotingPanel");
+        HideGameObjectByExactName("VoteResultText");
+        HideGameObjectByExactName("PublicAntidoteStatusPanel");
+        HideGameObjectByExactName("PersonalAntidotePanel");
+
+        HidePersonalAntidoteOverlay();
+        HidePublicAntidoteStatus();
+
+        if (resultText != null)
+            resultText.text = "";
+
+        if (timerText != null)
+            timerText.text = "";
+
+        BotChatDirector.Instance?.HideChat();
+
+        Debug.Log("[MEETING UI] Cleared meeting/voting/antidote UI. Reason=" + reason, this);
+    }
+
+    void HideMeetingAndVotingUi()
+    {
+        if (meetingPanel != null)
+        {
+            meetingPanel.SetActive(false);
+            CanvasGroup meetingGroup = meetingPanel.GetComponent<CanvasGroup>();
+            if (meetingGroup != null)
+            {
+                meetingGroup.alpha = 0f;
+                meetingGroup.interactable = false;
+                meetingGroup.blocksRaycasts = false;
+            }
+        }
+
+        if (votingPanel != null)
+        {
+            votingPanel.SetActive(false);
+            CanvasGroup votingGroup = votingPanel.GetComponent<CanvasGroup>();
+            if (votingGroup != null)
+            {
+                votingGroup.alpha = 0f;
+                votingGroup.interactable = false;
+                votingGroup.blocksRaycasts = false;
+            }
+        }
+
+        SetVoteButtonsInteractable(false);
+    }
+
+    bool AreVoteButtonsChildrenOfMeetingPanel()
+    {
+        if (meetingPanel == null || voteButtons == null)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < voteButtons.Count; i++)
+        {
+            Button button = voteButtons[i];
+            if (button != null && button.transform.IsChildOf(meetingPanel.transform))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    bool IsFinalHuntActive()
+    {
+        FinalHuntManager finalHuntManager = FindAnyObjectByType<FinalHuntManager>(FindObjectsInactive.Include);
+        return finalHuntManager != null && finalHuntManager.IsFinalHuntActive;
     }
 
     void UpdateTimerText()
