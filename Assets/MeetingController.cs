@@ -225,6 +225,9 @@ public sealed class MeetingController : MonoBehaviour
             meetingPanel.SetActive(true);
         }
 
+        // Show meeting chat UI if present
+        BotChatDirector.Instance?.ShowChat();
+
         ApplyMeetingVotingMovementLock();
         EnsureVoteButtonsSortedBySlot();
         ConfigureVoteButtons(false);
@@ -1866,6 +1869,8 @@ public sealed class MeetingController : MonoBehaviour
 
         HidePersonalAntidoteOverlay();
         HidePublicAntidoteStatus();
+        // Hide meeting chat UI
+        BotChatDirector.Instance?.HideChat();
         RestoreMovementAfterMeeting();
     }
 
