@@ -159,7 +159,7 @@ public sealed class ObjectiveHUDController : MonoBehaviour
         // Handle debug hotkeys only
 
         // Detect Final Hunt state changes and update HUD only on transitions
-        bool currentFinalHuntState = finalHuntManager != null ? finalHuntManager.IsFinalHuntActive : isFinalHuntActive;
+        bool currentFinalHuntState = finalHuntManager != null && finalHuntManager.IsFinalHuntActive;
         if (currentFinalHuntState != wasFinalHuntActiveLastFrame)
         {
             if (currentFinalHuntState)
@@ -174,6 +174,40 @@ public sealed class ObjectiveHUDController : MonoBehaviour
             wasFinalHuntActiveLastFrame = currentFinalHuntState;
             isFinalHuntActive = currentFinalHuntState;
         }
+    }
+
+    public void ResetHudForDemo()
+    {
+        HideFinalHuntFlicker();
+        RefreshBindings();
+
+        isFinalHuntActive = false;
+        wasFinalHuntActiveLastFrame = false;
+
+        RefreshObjectiveText();
+        Debug.Log("[OBJECTIVE HUD] Reset for demo.", this);
+    }
+
+    public void ForceHideFinalHuntHud()
+    {
+        HideFinalHuntFlicker();
+
+        isFinalHuntActive = false;
+        wasFinalHuntActiveLastFrame = false;
+
+        if (bottomRightFinalHuntText != null)
+        {
+            bottomRightFinalHuntText.text = string.Empty;
+            bottomRightFinalHuntText.alpha = 0f;
+            bottomRightFinalHuntText.gameObject.SetActive(false);
+        }
+
+        if (bottomRightCanvasGroup != null)
+        {
+            bottomRightCanvasGroup.alpha = 0f;
+        }
+
+        RefreshObjectiveText();
     }
 
     public void Initialize(TMP_Text topRightText, TMP_Text bottomRightText)

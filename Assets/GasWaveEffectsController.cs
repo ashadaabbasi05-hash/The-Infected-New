@@ -37,6 +37,7 @@ public sealed class GasWaveEffectsController : MonoBehaviour
     Coroutine overlayRoutine;
     Coroutine cameraShakeRoutine;
     Coroutine ambientFadeRoutine;
+    Coroutine demoGasRoutine;
 
     readonly Dictionary<PlayerMovement, float> originalMoveSpeeds = new Dictionary<PlayerMovement, float>();
 
@@ -85,6 +86,7 @@ public sealed class GasWaveEffectsController : MonoBehaviour
         }
 
         StopAllCoroutines();
+        demoGasRoutine = null;
         ResetEffectsImmediate();
     }
 
@@ -274,6 +276,12 @@ public sealed class GasWaveEffectsController : MonoBehaviour
     {
         isGasWaveActive = false;
 
+        if (demoGasRoutine != null)
+        {
+            StopCoroutine(demoGasRoutine);
+            demoGasRoutine = null;
+        }
+
         if (overlayRoutine != null)
         {
             StopCoroutine(overlayRoutine);
@@ -316,7 +324,36 @@ public sealed class GasWaveEffectsController : MonoBehaviour
     public void ForceStopGasEffects()
     {
         ResetEffectsImmediate();
-        Debug.Log("[GAS] Force stopped gas effects.", this);
+        Debug.Log("[GAS FX] Gas effects force stopped.", this);
+    }
+
+    public void PlayDemoGasWaveEffects(float durationSeconds)
+    {
+        if (durationSeconds < 0f)
+        {
+            durationSeconds = 0f;
+        }
+
+        if (demoGasRoutine != null)
+        {
+            StopCoroutine(demoGasRoutine);
+        }
+
+        ForceStopGasEffects();
+        ActivateGasWaveEffects(true);
+        demoGasRoutine = StartCoroutine(StopDemoGasAfterDelay(durationSeconds));
+        Debug.Log("[GAS FX] Demo gas wave effects started.", this);
+    }
+
+    IEnumerator StopDemoGasAfterDelay(float durationSeconds)
+    {
+        if (durationSeconds > 0f)
+        {
+            yield return new WaitForSeconds(durationSeconds);
+        }
+
+        ForceStopGasEffects();
+        demoGasRoutine = null;
     }
 
     void SetEffectsEnabled(bool enabled)

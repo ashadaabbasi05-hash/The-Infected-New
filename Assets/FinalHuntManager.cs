@@ -44,6 +44,11 @@ public sealed class FinalHuntManager : MonoBehaviour
     int lastLoggedAliveInfected = -1;
     int lastLoggedAliveHumans = -1;
     bool warningUiConfigured;
+    PlayerIdentity trackedLastHuman;
+    bool meetingControllerWasEnabledBeforeFinalHunt = true;
+    bool meetingControllerWasActiveBeforeFinalHunt = true;
+    bool gasWaveEffectsControllerWasEnabledBeforeFinalHunt = true;
+    bool gameManagerWasEnabledBeforeFinalHunt = true;
 
     void Awake()
     {
@@ -183,9 +188,49 @@ public sealed class FinalHuntManager : MonoBehaviour
 
         AgentTracePanel.Trace("FINAL HUNT", $"Last human: {lastHuman.playerName}");
         Debug.Log($"[FINAL HUNT] Last human is {GetDebugPlayerLabel(lastHuman)}.", lastHuman);
+        trackedLastHuman = lastHuman;
 
         OnFinalHuntStarted?.Invoke();
         Debug.Log("[FINAL HUNT] Objective HUD notified.", this);
+    }
+
+    public void ResetFinalHuntForDemo()
+    {
+        StopFinalHuntWarningRoutine();
+
+        IsFinalHuntActive = false;
+        trackedLastHuman = null;
+
+        HideFinalHuntWarningImmediate();
+
+        if (finalHuntText != null)
+        {
+            finalHuntText.text = string.Empty;
+            finalHuntText.gameObject.SetActive(false);
+        }
+
+        if (finalHuntPanel != null)
+        {
+            finalHuntPanel.SetActive(false);
+        }
+
+        if (meetingController != null)
+        {
+            meetingController.gameObject.SetActive(meetingControllerWasActiveBeforeFinalHunt);
+            meetingController.enabled = meetingControllerWasEnabledBeforeFinalHunt;
+        }
+
+        if (gasWaveEffectsController != null)
+        {
+            gasWaveEffectsController.enabled = gasWaveEffectsControllerWasEnabledBeforeFinalHunt;
+        }
+
+        if (gameManager != null)
+        {
+            gameManager.enabled = gameManagerWasEnabledBeforeFinalHunt;
+        }
+
+        Debug.Log("[FINAL HUNT] Reset for demo.", this);
     }
 
     public void ForceStartFinalHuntDebug()
@@ -275,6 +320,8 @@ public sealed class FinalHuntManager : MonoBehaviour
     {
         if (meetingController != null)
         {
+            meetingControllerWasActiveBeforeFinalHunt = meetingController.gameObject.activeSelf;
+            meetingControllerWasEnabledBeforeFinalHunt = meetingController.enabled;
             // Disable meeting system component and object to stop updates and hide UI.
             meetingController.enabled = false;
             meetingController.gameObject.SetActive(false);
@@ -282,6 +329,7 @@ public sealed class FinalHuntManager : MonoBehaviour
 
         if (gasWaveEffectsController != null)
         {
+            gasWaveEffectsControllerWasEnabledBeforeFinalHunt = gasWaveEffectsController.enabled;
             gasWaveEffectsController.ForceStopGasEffects();
             gasWaveEffectsController.enabled = false;
         }
@@ -293,6 +341,7 @@ public sealed class FinalHuntManager : MonoBehaviour
 
         if (gameManager != null)
         {
+            gameManagerWasEnabledBeforeFinalHunt = gameManager.enabled;
             // Keep current phase in Exploration and stop phase loop updates.
             if (GameManager.CurrentPhase != GamePhase.Exploration)
             {
