@@ -369,7 +369,7 @@ MonoBehaviour:
   m_OnClick:
     m_PersistentCalls:
       m_Calls:
-      - m_Target: {fileID: 493425096}
+      - m_Target: {fileID: 0}
         m_TargetAssemblyTypeName: WireTaskMinigame, Assembly-CSharp
         m_MethodName: Close
         m_Mode: 1
@@ -604,7 +604,7 @@ MonoBehaviour:
   exitScanPromptText: {fileID: 0}
   showExitScanDebugLogs: 1
   useWireMinigame: 1
-  wireTaskMinigame: {fileID: 493425096}
+  wireTaskMinigame: {fileID: 0}
   interactionPrompt: {fileID: 0}
   enableDebugTaskHotkeys: 1
   completedColor: {r: 0, g: 1, b: 0, a: 1}
@@ -1256,7 +1256,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::BotDecisionDirector
   enableDecisionDirector: 1
-  useTeamADecideActionApi: 0
+  useTeamADecideActionApi: 1
   decisionTickInterval: 5
   apiTimeoutSeconds: 4
   matchId: ROOM123
@@ -1332,7 +1332,7 @@ MonoBehaviour:
   isLeftNode: 1
   nodeImage: {fileID: 217198534}
   labelText: {fileID: 1941709200}
-  minigame: {fileID: 493425096}
+  minigame: {fileID: 0}
 --- !u!114 &217198534
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -1918,6 +1918,7 @@ MonoBehaviour:
   finalHuntManager: {fileID: 2008169957}
   autoFindReferences: 1
   enableDebugLogs: 1
+  interactTapCooldown: 0.25
 --- !u!4 &356462493
 Transform:
   m_ObjectHideFlags: 0
@@ -2263,7 +2264,7 @@ MonoBehaviour:
   isLeftNode: 0
   nodeImage: {fileID: 413526244}
   labelText: {fileID: 1954563976}
-  minigame: {fileID: 493425096}
+  minigame: {fileID: 0}
 --- !u!114 &413526244
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -2357,7 +2358,7 @@ MonoBehaviour:
   isLeftNode: 0
   nodeImage: {fileID: 416786555}
   labelText: {fileID: 933692395}
-  minigame: {fileID: 493425096}
+  minigame: {fileID: 0}
 --- !u!114 &416786555
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -2577,7 +2578,6 @@ GameObject:
   - component: {fileID: 493425095}
   - component: {fileID: 493425098}
   - component: {fileID: 493425097}
-  - component: {fileID: 493425096}
   m_Layer: 5
   m_Name: WireTaskPanel
   m_TagString: Untagged
@@ -2610,38 +2610,6 @@ RectTransform:
   m_AnchoredPosition: {x: 0, y: 0}
   m_SizeDelta: {x: 800, y: 500}
   m_Pivot: {x: 0.5, y: 0.5}
---- !u!114 &493425096
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 493425094}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: dabaaeba68e4fc44d80b93b04ba4dfd9, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::WireTaskMinigame
-  panelRoot: {fileID: 493425094}
-  wirePanelRect: {fileID: 493425095}
-  titleText: {fileID: 128055387}
-  instructionText: {fileID: 1491416659}
-  closeButton: {fileID: 60096443}
-  completionFlashImage: {fileID: 0}
-  leftNodes:
-  - {fileID: 875007206}
-  - {fileID: 875761615}
-  - {fileID: 217198533}
-  - {fileID: 1023197956}
-  rightNodes:
-  - {fileID: 849606325}
-  - {fileID: 413526243}
-  - {fileID: 416786554}
-  - {fileID: 608763935}
-  linePrefab: {fileID: 0}
-  lineContainer: {fileID: 1509921077}
-  debugLogs: 1
-  allowCloseWithoutComplete: 1
 --- !u!114 &493425097
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -3219,7 +3187,7 @@ MonoBehaviour:
   exitScanPromptText: {fileID: 0}
   showExitScanDebugLogs: 1
   useWireMinigame: 1
-  wireTaskMinigame: {fileID: 493425096}
+  wireTaskMinigame: {fileID: 0}
   interactionPrompt: {fileID: 0}
   enableDebugTaskHotkeys: 1
   completedColor: {r: 0, g: 1, b: 0, a: 1}
@@ -3969,7 +3937,7 @@ MonoBehaviour:
   isLeftNode: 0
   nodeImage: {fileID: 608763936}
   labelText: {fileID: 1581670309}
-  minigame: {fileID: 493425096}
+  minigame: {fileID: 0}
 --- !u!114 &608763936
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -4514,7 +4482,7 @@ MonoBehaviour:
   exitScanPromptText: {fileID: 0}
   showExitScanDebugLogs: 1
   useWireMinigame: 1
-  wireTaskMinigame: {fileID: 493425096}
+  wireTaskMinigame: {fileID: 0}
   interactionPrompt: {fileID: 0}
   enableDebugTaskHotkeys: 1
   completedColor: {r: 0, g: 1, b: 0, a: 1}
@@ -5584,7 +5552,7 @@ MonoBehaviour:
   exitScanPromptText: {fileID: 0}
   showExitScanDebugLogs: 1
   useWireMinigame: 1
-  wireTaskMinigame: {fileID: 493425096}
+  wireTaskMinigame: {fileID: 0}
   interactionPrompt: {fileID: 0}
   enableDebugTaskHotkeys: 1
   completedColor: {r: 0, g: 1, b: 0, a: 1}
@@ -5743,7 +5711,7 @@ MonoBehaviour:
   isLeftNode: 0
   nodeImage: {fileID: 849606326}
   labelText: {fileID: 387055696}
-  minigame: {fileID: 493425096}
+  minigame: {fileID: 0}
 --- !u!114 &849606326
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -6045,7 +6013,7 @@ MonoBehaviour:
   isLeftNode: 1
   nodeImage: {fileID: 875007207}
   labelText: {fileID: 1494227369}
-  minigame: {fileID: 493425096}
+  minigame: {fileID: 0}
 --- !u!114 &875007207
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -6139,7 +6107,7 @@ MonoBehaviour:
   isLeftNode: 1
   nodeImage: {fileID: 875761616}
   labelText: {fileID: 1948993488}
-  minigame: {fileID: 493425096}
+  minigame: {fileID: 0}
 --- !u!114 &875761616
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -6857,7 +6825,7 @@ MonoBehaviour:
   exitScanPromptText: {fileID: 0}
   showExitScanDebugLogs: 1
   useWireMinigame: 1
-  wireTaskMinigame: {fileID: 493425096}
+  wireTaskMinigame: {fileID: 0}
   interactionPrompt: {fileID: 0}
   enableDebugTaskHotkeys: 1
   completedColor: {r: 0, g: 1, b: 0, a: 1}
@@ -7093,6 +7061,7 @@ RectTransform:
   - {fileID: 199673368}
   - {fileID: 1110009930}
   - {fileID: 1406660581}
+  - {fileID: 1244788531}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0, y: 0}
@@ -7219,7 +7188,7 @@ MonoBehaviour:
   isLeftNode: 1
   nodeImage: {fileID: 1023197957}
   labelText: {fileID: 1147745049}
-  minigame: {fileID: 493425096}
+  minigame: {fileID: 0}
 --- !u!114 &1023197957
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -8004,7 +7973,7 @@ MonoBehaviour:
   exitScanPromptText: {fileID: 0}
   showExitScanDebugLogs: 1
   useWireMinigame: 1
-  wireTaskMinigame: {fileID: 493425096}
+  wireTaskMinigame: {fileID: 0}
   interactionPrompt: {fileID: 0}
   enableDebugTaskHotkeys: 1
   completedColor: {r: 0, g: 1, b: 0, a: 1}
@@ -8982,6 +8951,74 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1207242644}
   m_CullTransparentMesh: 1
+--- !u!1 &1244788530
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1244788531}
+  - component: {fileID: 1244788532}
+  m_Layer: 5
+  m_Name: WireTaskSystem
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!224 &1244788531
+RectTransform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1244788530}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1009832301}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+  m_AnchorMin: {x: 0.5, y: 0.5}
+  m_AnchorMax: {x: 0.5, y: 0.5}
+  m_AnchoredPosition: {x: 0, y: 0}
+  m_SizeDelta: {x: 100, y: 100}
+  m_Pivot: {x: 0.5, y: 0.5}
+--- !u!114 &1244788532
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1244788530}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: dabaaeba68e4fc44d80b93b04ba4dfd9, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::WireTaskMinigame
+  panelRoot: {fileID: 493425094}
+  wirePanelRect: {fileID: 493425095}
+  titleText: {fileID: 128055387}
+  instructionText: {fileID: 1491416659}
+  closeButton: {fileID: 60096443}
+  completionFlashImage: {fileID: 0}
+  leftNodes:
+  - {fileID: 875007206}
+  - {fileID: 875761615}
+  - {fileID: 217198533}
+  - {fileID: 1023197956}
+  rightNodes:
+  - {fileID: 849606325}
+  - {fileID: 413526243}
+  - {fileID: 416786554}
+  - {fileID: 608763935}
+  linePrefab: {fileID: 0}
+  lineContainer: {fileID: 1509921077}
+  debugLogs: 1
+  allowCloseWithoutComplete: 1
 --- !u!1 &1294862847
 GameObject:
   m_ObjectHideFlags: 0
@@ -13318,7 +13355,7 @@ MonoBehaviour:
   exitScanPromptText: {fileID: 0}
   showExitScanDebugLogs: 1
   useWireMinigame: 1
-  wireTaskMinigame: {fileID: 493425096}
+  wireTaskMinigame: {fileID: 0}
   interactionPrompt: {fileID: 0}
   enableDebugTaskHotkeys: 1
   completedColor: {r: 0, g: 1, b: 0, a: 1}

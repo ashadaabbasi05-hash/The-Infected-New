@@ -27,6 +27,7 @@ public sealed class MobileActionButtonsController : MonoBehaviour
     [Header("Options")]
     [SerializeField] public bool autoFindReferences = true;
     [SerializeField] public bool enableDebugLogs = true;
+    [SerializeField, Min(0.01f)] float interactTapCooldown = 0.25f;
 
     public bool IsInteractHeld { get; private set; }
 
@@ -37,6 +38,7 @@ public sealed class MobileActionButtonsController : MonoBehaviour
     bool suppressNextInteractClick;
     int interactPressSequence;
     int suppressClickSequence = -1;
+    float lastInteractPressedTime;
 
     void Awake()
     {
@@ -194,6 +196,15 @@ public sealed class MobileActionButtonsController : MonoBehaviour
         {
             suppressNextInteractClick = false;
             suppressClickSequence = -1;
+            if (enableDebugLogs)
+            {
+                Debug.Log("[MOBILE BUTTONS] Interact tap suppressed by hold handler.");
+            }
+            return;
+        }
+
+        if (!CanProcessInteractPress())
+        {
             return;
         }
 
@@ -221,8 +232,32 @@ public sealed class MobileActionButtonsController : MonoBehaviour
         }
     }
 
+    private bool CanProcessInteractPress()
+    {
+        if (Time.unscaledTime - lastInteractPressedTime < interactTapCooldown)
+        {
+            if (enableDebugLogs)
+            {
+                Debug.Log("[MOBILE BUTTONS] Interact ignored by cooldown.");
+            }
+            return false;
+        }
+
+        lastInteractPressedTime = Time.unscaledTime;
+        return true;
+    }
+
     public void HandleInteractButtonDown()
     {
+        if (IsInteractHeld)
+        {
+            if (enableDebugLogs)
+            {
+                Debug.Log("[MOBILE BUTTONS] Interact button down ignored (already held).");
+            }
+            return;
+        }
+
         IsInteractHeld = true;
         interactPressSequence++;
 
@@ -231,18 +266,29 @@ public sealed class MobileActionButtonsController : MonoBehaviour
         {
             if (currentInteractable.IsExitScanTask)
             {
+                suppressNextInteractClick = true;
+                suppressClickSequence = interactPressSequence;
                 currentInteractable.StartHoldInteract();
                 return;
             }
 
             suppressNextInteractClick = true;
             suppressClickSequence = interactPressSequence;
-            currentInteractable.StartHoldInteract();
+            currentInteractable.StartTapInteract();
         }
     }
 
     public void HandleInteractButtonUp()
     {
+        if (!IsInteractHeld)
+        {
+            if (enableDebugLogs)
+            {
+                Debug.Log("[MOBILE BUTTONS] Interact button up ignored (not held).");
+            }
+            return;
+        }
+
         IsInteractHeld = false;
 
         TaskInteractable currentInteractable = TaskInteractable.CurrentLocalInteractable;

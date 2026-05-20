@@ -33,7 +33,9 @@ public sealed class WireTaskMinigame : MonoBehaviour
     bool isOpen;
     bool isCompleted;
 
-    public bool IsOpen => isOpen;
+    public bool IsOpen => isOpen && panelRoot != null && panelRoot.activeInHierarchy;
+
+    public bool IsOpeningOrOpen => isOpen || (panelRoot != null && panelRoot.activeInHierarchy);
 
     public bool IsPanelVisibleInHierarchy =>
         panelRoot != null && panelRoot.activeInHierarchy;
@@ -63,19 +65,24 @@ public sealed class WireTaskMinigame : MonoBehaviour
 
     void EnsurePanelReferences()
     {
+        // If panelRoot not assigned, try to find WireTaskPanel separately
         if (panelRoot == null)
         {
-            panelRoot = gameObject;
+            GameObject found = GameObject.Find("WireTaskPanel");
+            if (found != null)
+            {
+                panelRoot = found;
+            }
         }
 
-        if (wirePanelRect == null)
+        if (wirePanelRect == null && panelRoot != null)
         {
-            wirePanelRect = GetComponent<RectTransform>();
+            wirePanelRect = panelRoot.GetComponent<RectTransform>();
         }
 
-        if (lineContainer == null)
+        if (lineContainer == null && panelRoot != null)
         {
-            Transform lineContainerTransform = transform.Find("LineContainer");
+            Transform lineContainerTransform = panelRoot.transform.Find("LineContainer");
             if (lineContainerTransform != null)
             {
                 lineContainer = lineContainerTransform.GetComponent<RectTransform>();
@@ -85,45 +92,66 @@ public sealed class WireTaskMinigame : MonoBehaviour
 
     public void Open(TaskInteractable task)
     {
+        // Early guard: task must be valid
         if (task == null)
         {
+            Debug.LogWarning("[WIRE TASK] Open called with null task.", this);
             return;
         }
 
+        // Ensure references
         EnsurePanelReferences();
 
+        // Early guard: panelRoot must be found
         if (panelRoot == null)
         {
-            panelRoot = gameObject;
-            Debug.LogWarning("[WIRE TASK] panelRoot was missing. Defaulted to WireTaskMinigame GameObject.", this);
+            Debug.LogWarning("[WIRE TASK] panelRoot not found. Cannot open minigame.", this);
+            return;
         }
 
-        if (wirePanelRect == null)
-        {
-            wirePanelRect = GetComponent<RectTransform>();
-        }
-
-        if (isOpen && panelRoot.activeInHierarchy)
+        // Early guard: panel must not already be open
+        if (IsOpen)
         {
             if (debugLogs)
             {
-                Debug.Log("[WIRE TASK] Open ignored because panel is already visible.", this);
+                Debug.Log("[WIRE TASK] Open ignored because panel is already open.", this);
             }
-
             return;
         }
 
-        panelRoot.SetActive(true);
+        // Check parent hierarchy before activation
+        if (panelRoot.transform.parent != null && !panelRoot.transform.parent.gameObject.activeSelf)
+        {
+            Debug.LogWarning($"[WIRE TASK] Panel parent is inactive: {panelRoot.transform.parent.gameObject.name}", this);
+            return;
+        }
+
+        // Set state BEFORE activation
+        currentTask = task;
+        isCompleted = false;
+        isOpen = true;
+
+        // Activate panel only (not controller gameObject)
+        if (!panelRoot.activeSelf)
+        {
+            panelRoot.SetActive(true);
+        }
+
+        // Validate activation succeeded before proceeding
+        if (!panelRoot.activeSelf || !panelRoot.activeInHierarchy)
+        {
+            currentTask = null;
+            isOpen = false;
+            Debug.LogWarning($"[WIRE TASK] Panel activation failed. Aborting open. panelRoot={panelRoot.name} activeSelf={panelRoot.activeSelf} activeInHierarchy={panelRoot.activeInHierarchy}", this);
+            return;
+        }
+
         panelRoot.transform.SetAsLastSibling();
 
         if (debugLogs)
         {
-            Debug.Log($"[WIRE TASK] Panel activated. activeSelf={panelRoot.activeSelf} activeInHierarchy={panelRoot.activeInHierarchy}", this);
+            Debug.Log($"[WIRE TASK] Panel activated. panelRoot={panelRoot.name} activeSelf={panelRoot.activeSelf} activeInHierarchy={panelRoot.activeInHierarchy} controllerActive={gameObject.activeInHierarchy}", this);
         }
-
-        currentTask = task;
-        isCompleted = false;
-        isOpen = true;
 
         ResetPuzzle();
 
@@ -150,6 +178,15 @@ public sealed class WireTaskMinigame : MonoBehaviour
     {
         if (!allowCloseWithoutComplete && !isCompleted)
         {
+            return;
+        }
+
+        if (!isOpen || (panelRoot != null && !panelRoot.activeSelf))
+        {
+            if (debugLogs)
+            {
+                Debug.Log("[WIRE TASK] Close ignored because panel is already closed.", this);
+            }
             return;
         }
 
@@ -342,6 +379,11 @@ public sealed class WireTaskMinigame : MonoBehaviour
 
     void CloseInternal()
     {
+        if (!isOpen)
+        {
+            return;
+        }
+
         ClearLines();
         connectedMatches.Clear();
 

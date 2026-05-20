@@ -5,6 +5,7 @@ using UnityEngine.EventSystems;
 public sealed class MobileButtonHoldHandler : MonoBehaviour, IPointerDownHandler, IPointerUpHandler, IPointerExitHandler
 {
     MobileActionButtonsController controller;
+    bool isPointerPressed;
 
     void Awake()
     {
@@ -21,16 +22,34 @@ public sealed class MobileButtonHoldHandler : MonoBehaviour, IPointerDownHandler
 
     public void OnPointerDown(PointerEventData eventData)
     {
+        if (isPointerPressed)
+        {
+            return;
+        }
+
+        isPointerPressed = true;
         ResolveController()?.HandleInteractButtonDown();
     }
 
     public void OnPointerUp(PointerEventData eventData)
     {
+        if (!isPointerPressed)
+        {
+            return;
+        }
+
+        isPointerPressed = false;
         ResolveController()?.HandleInteractButtonUp();
     }
 
     public void OnPointerExit(PointerEventData eventData)
     {
+        if (!isPointerPressed)
+        {
+            return;
+        }
+
+        isPointerPressed = false;
         ResolveController()?.HandleInteractButtonUp();
     }
 

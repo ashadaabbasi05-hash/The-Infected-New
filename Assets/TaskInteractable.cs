@@ -43,6 +43,8 @@ public sealed class TaskInteractable : MonoBehaviour
     float exitScanProgress;
     bool exitScanUnlocked;
 
+    readonly System.Collections.Generic.HashSet<Collider2D> localPlayerCollidersInside = new System.Collections.Generic.HashSet<Collider2D>();
+
     // Mobile helper: current task the local player can interact with
     public static TaskInteractable CurrentLocalInteractable { get; private set; }
 
@@ -129,6 +131,14 @@ public sealed class TaskInteractable : MonoBehaviour
             return;
         }
 
+        bool isFirstCollider = localPlayerCollidersInside.Count == 0;
+        localPlayerCollidersInside.Add(other);
+
+        if (!isFirstCollider)
+        {
+            return;
+        }
+
         localPlayerInRange = identity;
         CurrentLocalInteractable = this;
         SetPromptVisible(true);
@@ -139,6 +149,13 @@ public sealed class TaskInteractable : MonoBehaviour
     {
         PlayerIdentity identity = other != null ? other.GetComponentInParent<PlayerIdentity>() : null;
         if (identity == null || localPlayerInRange != identity)
+        {
+            return;
+        }
+
+        localPlayerCollidersInside.Remove(other);
+
+        if (localPlayerCollidersInside.Count > 0)
         {
             return;
         }
@@ -172,12 +189,46 @@ public sealed class TaskInteractable : MonoBehaviour
         AttemptCompletion(false);
     }
 
+    public void StartTapInteract()
+    {
+        if (isExitScanTask)
+        {
+            return;
+        }
+
+        // Check if wire minigame is already open/opening before attempting to open
+        if (useWireMinigame && IsWireTask() && wireTaskMinigame != null && wireTaskMinigame.IsOpeningOrOpen)
+        {
+            if (showExitScanDebugLogs)
+            {
+                Debug.Log("[TASK DEBUG] Interact ignored: wire minigame already open.", this);
+            }
+            return;
+        }
+
+        if (TryOpenWireMinigame())
+        {
+            if (showExitScanDebugLogs)
+            {
+                Debug.Log("[TASK DEBUG] Wire task tap accepted: " + TaskId, this);
+            }
+            return;
+        }
+
+        AttemptCompletion(false);
+    }
+
     public void StartHoldInteract()
     {
         if (!isExitScanTask)
         {
             Interact();
             return;
+        }
+
+        if (showExitScanDebugLogs)
+        {
+            Debug.Log("[TASK DEBUG] Exit scan hold started.", this);
         }
 
         if (completed)
@@ -450,28 +501,49 @@ public sealed class TaskInteractable : MonoBehaviour
             return wireTaskMinigame;
         }
 
+        // First, try to find the active WireTaskSystem controller
+        GameObject wireSysGO = GameObject.Find("WireTaskSystem");
+        if (wireSysGO != null && wireSysGO.activeInHierarchy)
+        {
+            WireTaskMinigame controller = wireSysGO.GetComponent<WireTaskMinigame>();
+            if (controller != null)
+            {
+                if (showExitScanDebugLogs)
+                {
+                    Debug.Log("[WIRE TASK] Using WireTaskMinigame controller: WireTaskSystem panelRoot=WireTaskPanel", this);
+                }
+                wireTaskMinigame = controller;
+                return wireTaskMinigame;
+            }
+        }
+
+        // Fallback: find any WireTaskMinigame, preferring active ones
         WireTaskMinigame[] allMinigames = FindObjectsByType<WireTaskMinigame>(FindObjectsInactive.Include);
         if (allMinigames == null || allMinigames.Length == 0)
         {
             return null;
         }
 
-        if (allMinigames.Length > 1)
-        {
-            Debug.LogWarning($"[WIRE TASK] Multiple WireTaskMinigame instances found: {allMinigames.Length}. Preferring WireTaskPanel.", this);
-        }
-
+        // Prefer active controller
         for (int i = 0; i < allMinigames.Length; i++)
         {
-            WireTaskMinigame candidate = allMinigames[i];
-            if (candidate != null && candidate.gameObject.name == "WireTaskPanel")
+            if (allMinigames[i].gameObject.activeInHierarchy)
             {
-                wireTaskMinigame = candidate;
+                wireTaskMinigame = allMinigames[i];
+                if (showExitScanDebugLogs)
+                {
+                    Debug.Log($"[WIRE TASK] Using active WireTaskMinigame controller: {wireTaskMinigame.gameObject.name}", this);
+                }
                 return wireTaskMinigame;
             }
         }
 
+        // Fallback: use first found
         wireTaskMinigame = allMinigames[0];
+        if (showExitScanDebugLogs)
+        {
+            Debug.Log($"[WIRE TASK] Using WireTaskMinigame controller: {wireTaskMinigame.gameObject.name} (no active found)", this);
+        }
         return wireTaskMinigame;
     }
 
@@ -512,8 +584,13 @@ public sealed class TaskInteractable : MonoBehaviour
             return false;
         }
 
-        if (minigame.IsOpen && minigame.IsPanelVisibleInHierarchy)
+        // Guard: if minigame is already open or opening, don't try to open again
+        if (minigame.IsOpeningOrOpen)
         {
+            if (showExitScanDebugLogs)
+            {
+                Debug.Log("[TASK DEBUG] Interact ignored: wire minigame already open.", this);
+            }
             return true;
         }
 
