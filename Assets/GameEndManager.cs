@@ -66,6 +66,7 @@ public sealed class GameEndManager : MonoBehaviour
     {
         if (gameEnded)
         {
+            Debug.Log("[GAME END] Human win ignored: game already ended.", this);
             return;
         }
 
@@ -80,6 +81,13 @@ public sealed class GameEndManager : MonoBehaviour
 
         DisablePlayerMovement();
         Debug.Log("Humans escaped. You win.", this);
+    }
+
+    public void ResetGameEndForDemo()
+    {
+        gameEnded = false;
+        checkTimer = 0f;
+        HideEndPanels();
     }
 
     public void CheckLoseConditions()

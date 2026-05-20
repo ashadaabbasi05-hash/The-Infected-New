@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
 
@@ -15,6 +16,8 @@ public sealed class EscapeDoor : MonoBehaviour
     [SerializeField] Color unlockedColor = Color.cyan;
 
     bool isUnlocked;
+    bool escapeTriggered;
+    readonly HashSet<Collider2D> triggeredColliders = new HashSet<Collider2D>();
     SpriteRenderer spriteRenderer;
     TaskManager subscribedTaskManager;
     public static EscapeDoor CurrentLocalDoor { get; private set; }
@@ -126,6 +129,22 @@ public sealed class EscapeDoor : MonoBehaviour
 
     void OnTriggerEnter2D(Collider2D other)
     {
+        if (escapeTriggered)
+        {
+            Debug.Log("[TASK DEBUG] Escape door ignored: win already triggered.", this);
+            return;
+        }
+
+        if (other != null && triggeredColliders.Contains(other))
+        {
+            return;
+        }
+
+        if (other != null)
+        {
+            triggeredColliders.Add(other);
+        }
+
         PlayerIdentity identity = other != null ? other.GetComponentInParent<PlayerIdentity>() : null;
         if (identity == null || !identity.isLocalPlayer || !identity.isAlive)
         {
@@ -154,6 +173,8 @@ public sealed class EscapeDoor : MonoBehaviour
 
         TryResolveGameEndManager();
 
+        escapeTriggered = true;
+
         if (gameEndManager != null)
         {
             gameEndManager.TriggerHumanWin();
@@ -161,8 +182,6 @@ public sealed class EscapeDoor : MonoBehaviour
 
         AgentTracePanel.Trace("OBJECTIVE", "Humans escaped.");
         ObjectiveHUDController.Instance?.HandleHumanWinTriggered();
-
-        Debug.Log("Humans escaped. You win.", this);
     }
 
     void OnTriggerExit2D(Collider2D other)
@@ -181,6 +200,12 @@ public sealed class EscapeDoor : MonoBehaviour
 
     public void Interact()
     {
+        if (escapeTriggered)
+        {
+            Debug.Log("[TASK DEBUG] Escape door ignored: win already triggered.", this);
+            return;
+        }
+
         if (!isUnlocked)
         {
             Debug.Log("[TASK DEBUG] Door locked. Complete all tasks.", this);
@@ -197,7 +222,13 @@ public sealed class EscapeDoor : MonoBehaviour
 
         AgentTracePanel.Trace("OBJECTIVE", "Humans escaped.");
         ObjectiveHUDController.Instance?.HandleHumanWinTriggered();
-        Debug.Log("Humans escaped. You win.", this);
+        escapeTriggered = true;
+    }
+
+    public void ResetDoorForDemo()
+    {
+        escapeTriggered = false;
+        triggeredColliders.Clear();
     }
 
     public static bool TryInteractCurrentDoor()

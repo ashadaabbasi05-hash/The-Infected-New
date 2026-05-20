@@ -10083,6 +10083,37 @@ MonoBehaviour:
   lineContainer: {fileID: 1509921077}
   debugLogs: 1
   allowCloseWithoutComplete: 1
+--- !u!1 &1251058102
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1251058103}
+  m_Layer: 0
+  m_Name: DemoReadinessChecker
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &1251058103
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1251058102}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 470.98132, y: 206.06514, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1294862847
 GameObject:
   m_ObjectHideFlags: 0
@@ -16652,3 +16683,4 @@ SceneRoots:
   - {fileID: 1790119998}
   - {fileID: 213032814}
   - {fileID: 139339959}
+  - {fileID: 1251058103}

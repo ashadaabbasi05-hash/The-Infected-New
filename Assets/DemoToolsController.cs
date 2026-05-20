@@ -227,6 +227,18 @@ public sealed class DemoToolsController : MonoBehaviour
             InvokeOptional(gasWaveEffectsController, "ForceStopGasEffects", null);
         }
 
+        EscapeDoor escapeDoor = FindAnyObjectByType<EscapeDoor>(FindObjectsInactive.Include);
+        if (escapeDoor != null)
+        {
+            InvokeOptional(escapeDoor, "ResetDoorForDemo", null);
+        }
+
+        GameEndManager gameEndManager = FindAnyObjectByType<GameEndManager>(FindObjectsInactive.Include);
+        if (gameEndManager != null)
+        {
+            InvokeOptional(gameEndManager, "ResetGameEndForDemo", null);
+        }
+
         HideNamedObject("FinalHuntPanel");
         HideNamedObject("FinalHuntText");
         HideNamedObject("BottomRightFinalHuntText");
