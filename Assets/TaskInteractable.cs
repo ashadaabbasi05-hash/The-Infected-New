@@ -450,7 +450,28 @@ public sealed class TaskInteractable : MonoBehaviour
             return wireTaskMinigame;
         }
 
-        wireTaskMinigame = FindAnyObjectByType<WireTaskMinigame>(FindObjectsInactive.Include);
+        WireTaskMinigame[] allMinigames = FindObjectsByType<WireTaskMinigame>(FindObjectsInactive.Include);
+        if (allMinigames == null || allMinigames.Length == 0)
+        {
+            return null;
+        }
+
+        if (allMinigames.Length > 1)
+        {
+            Debug.LogWarning($"[WIRE TASK] Multiple WireTaskMinigame instances found: {allMinigames.Length}. Preferring WireTaskPanel.", this);
+        }
+
+        for (int i = 0; i < allMinigames.Length; i++)
+        {
+            WireTaskMinigame candidate = allMinigames[i];
+            if (candidate != null && candidate.gameObject.name == "WireTaskPanel")
+            {
+                wireTaskMinigame = candidate;
+                return wireTaskMinigame;
+            }
+        }
+
+        wireTaskMinigame = allMinigames[0];
         return wireTaskMinigame;
     }
 
@@ -491,6 +512,12 @@ public sealed class TaskInteractable : MonoBehaviour
             return false;
         }
 
+        if (minigame.IsOpen && minigame.IsPanelVisibleInHierarchy)
+        {
+            return true;
+        }
+
+        Debug.Log($"[WIRE TASK] Opening minigame instance: {minigame.gameObject.name}", this);
         minigame.Open(this);
         return true;
     }

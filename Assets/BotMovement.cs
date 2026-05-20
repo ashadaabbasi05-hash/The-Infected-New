@@ -77,6 +77,17 @@ public sealed class BotMovement : MonoBehaviour
 
     void FixedUpdate()
     {
+        if (selfIdentity == null)
+        {
+            selfIdentity = GetComponent<PlayerIdentity>();
+        }
+
+        if (selfIdentity != null && selfIdentity.isFrozen)
+        {
+            StopMoving();
+            return;
+        }
+
         if (pauseDuringMeetingAndVoting && IsMeetingOrVotingActive())
         {
             StopMoving();
@@ -308,7 +319,7 @@ public sealed class BotMovement : MonoBehaviour
                 continue;
             }
 
-            if (!candidate.isAlive || candidate.isInfected)
+            if (!candidate.isAlive || candidate.isInfected || candidate.isFrozen)
             {
                 continue;
             }

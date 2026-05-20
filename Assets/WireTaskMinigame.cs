@@ -1,4 +1,3 @@
-using System.Collections;
 using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
@@ -36,8 +35,13 @@ public sealed class WireTaskMinigame : MonoBehaviour
 
     public bool IsOpen => isOpen;
 
+    public bool IsPanelVisibleInHierarchy =>
+        panelRoot != null && panelRoot.activeInHierarchy;
+
     void Awake()
     {
+        EnsurePanelReferences();
+
         if (closeButton != null)
         {
             closeButton.onClick.RemoveListener(Close);
@@ -48,6 +52,35 @@ public sealed class WireTaskMinigame : MonoBehaviour
         {
             panelRoot.SetActive(false);
         }
+
+        isOpen = false;
+    }
+
+    void OnValidate()
+    {
+        EnsurePanelReferences();
+    }
+
+    void EnsurePanelReferences()
+    {
+        if (panelRoot == null)
+        {
+            panelRoot = gameObject;
+        }
+
+        if (wirePanelRect == null)
+        {
+            wirePanelRect = GetComponent<RectTransform>();
+        }
+
+        if (lineContainer == null)
+        {
+            Transform lineContainerTransform = transform.Find("LineContainer");
+            if (lineContainerTransform != null)
+            {
+                lineContainer = lineContainerTransform.GetComponent<RectTransform>();
+            }
+        }
     }
 
     public void Open(TaskInteractable task)
@@ -55,6 +88,37 @@ public sealed class WireTaskMinigame : MonoBehaviour
         if (task == null)
         {
             return;
+        }
+
+        EnsurePanelReferences();
+
+        if (panelRoot == null)
+        {
+            panelRoot = gameObject;
+            Debug.LogWarning("[WIRE TASK] panelRoot was missing. Defaulted to WireTaskMinigame GameObject.", this);
+        }
+
+        if (wirePanelRect == null)
+        {
+            wirePanelRect = GetComponent<RectTransform>();
+        }
+
+        if (isOpen && panelRoot.activeInHierarchy)
+        {
+            if (debugLogs)
+            {
+                Debug.Log("[WIRE TASK] Open ignored because panel is already visible.", this);
+            }
+
+            return;
+        }
+
+        panelRoot.SetActive(true);
+        panelRoot.transform.SetAsLastSibling();
+
+        if (debugLogs)
+        {
+            Debug.Log($"[WIRE TASK] Panel activated. activeSelf={panelRoot.activeSelf} activeInHierarchy={panelRoot.activeInHierarchy}", this);
         }
 
         currentTask = task;
@@ -73,11 +137,6 @@ public sealed class WireTaskMinigame : MonoBehaviour
         {
             instructionText.text = "Drag each wire to matching color";
             instructionText.raycastTarget = false;
-        }
-
-        if (panelRoot != null)
-        {
-            panelRoot.SetActive(true);
         }
 
         AgentTracePanel.Trace("OBJECTIVE", $"Fix Wires opened: {task.TaskDisplayName}");
@@ -197,7 +256,34 @@ public sealed class WireTaskMinigame : MonoBehaviour
         }
 
         isCompleted = true;
-        StartCoroutine(CompleteRoutine());
+
+        if (completionFlashImage != null)
+        {
+            completionFlashImage.gameObject.SetActive(true);
+            Color flashColor = completionFlashImage.color;
+            flashColor.a = 0.85f;
+            completionFlashImage.color = flashColor;
+            flashColor.a = 0f;
+            completionFlashImage.color = flashColor;
+            completionFlashImage.gameObject.SetActive(false);
+        }
+
+        if (currentTask != null)
+        {
+            currentTask.CompleteFromMinigame();
+            AgentTracePanel.Trace("OBJECTIVE", $"Fix Wires completed: {currentTask.TaskDisplayName}");
+        }
+        else
+        {
+            AgentTracePanel.Trace("OBJECTIVE", "Fix Wires completed.");
+        }
+
+        if (debugLogs)
+        {
+            Debug.Log("[WIRE TASK] Puzzle completed.", this);
+        }
+
+        CloseInternal();
     }
 
     public GameObject CreateUILine(RectTransform from, RectTransform to, Color color)
@@ -254,36 +340,11 @@ public sealed class WireTaskMinigame : MonoBehaviour
         Debug.Log(message, this);
     }
 
-    IEnumerator CompleteRoutine()
-    {
-        if (completionFlashImage != null)
-        {
-            completionFlashImage.gameObject.SetActive(true);
-            Color flashColor = completionFlashImage.color;
-            flashColor.a = 0.85f;
-            completionFlashImage.color = flashColor;
-            yield return new WaitForSeconds(0.18f);
-            flashColor.a = 0f;
-            completionFlashImage.color = flashColor;
-            completionFlashImage.gameObject.SetActive(false);
-        }
-
-        if (currentTask != null)
-        {
-            currentTask.CompleteFromMinigame();
-            AgentTracePanel.Trace("OBJECTIVE", $"Fix Wires completed: {currentTask.TaskDisplayName}");
-        }
-        else
-        {
-            AgentTracePanel.Trace("OBJECTIVE", "Fix Wires completed.");
-        }
-
-        yield return new WaitForSeconds(0.1f);
-        CloseInternal();
-    }
-
     void CloseInternal()
     {
+        ClearLines();
+        connectedMatches.Clear();
+
         if (panelRoot != null)
         {
             panelRoot.SetActive(false);
@@ -292,8 +353,11 @@ public sealed class WireTaskMinigame : MonoBehaviour
         isOpen = false;
         isCompleted = false;
         currentTask = null;
-        ClearLines();
-        connectedMatches.Clear();
+
+        if (debugLogs)
+        {
+            Debug.Log("[WIRE TASK] Panel closed.", this);
+        }
     }
 
     void ClearLines()

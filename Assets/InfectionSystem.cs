@@ -7,6 +7,13 @@ public sealed class InfectionSystem : MonoBehaviour
 {
     public static InfectionSystem Instance { get; private set; }
 
+    [SerializeField]
+    string matchId = "ROOM123";
+
+    public string MatchId => matchId;
+
+    readonly HashSet<string> registeredBotApiIds = new HashSet<string>();
+
     [SerializeField, Min(0f)]
     float safePhaseDuration = 10f;
 
@@ -293,6 +300,41 @@ public sealed class InfectionSystem : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// Silent meeting-vote cure. Does not freeze, log role outcome, or start legacy freeze coroutines.
+    /// MeetingController owns the public antidote freeze sequence.
+    /// </summary>
+    public void ApplyVoteCure(PlayerIdentity target)
+    {
+        if (target == null || !target.isAlive || !target.isInfected)
+        {
+            return;
+        }
+
+        if (target == currentInfectedPlayer)
+        {
+            currentInfectedPlayer = null;
+        }
+
+        CancelAntidoteFreezeCoroutine(target);
+
+        target.Cure();
+        target.RefreshInfectionVisual(useObviousDebugInfectedColor);
+        DisableBotMovement(target);
+        target.RefreshControlState();
+
+        string botId = GetApiPlayerId(target);
+        RemoveRegisteredBotApiId(botId);
+
+        if (GameEndManager.Instance != null)
+        {
+            GameEndManager.Instance.CheckLoseConditions();
+        }
+    }
+
+    /// <summary>
+    /// Legacy/debug antidote path. Prefer MeetingController vote flow + ApplyVoteCure for meetings.
+    /// </summary>
     public void ApplyAntidote(PlayerIdentity target)
     {
         if (target == null)
@@ -302,28 +344,17 @@ public sealed class InfectionSystem : MonoBehaviour
 
         if (!target.isAlive)
         {
-            Debug.Log($"[INFECT DEBUG] Antidote target {GetPlayerName(target)} is dead. No effect.", target);
+            Debug.Log($"[INFECT DEBUG] Antidote target {GetPlayerName(target)} is dead. Skipped.", target);
             return;
         }
-
-        string playerName = GetPlayerName(target);
 
         if (!target.isInfected)
         {
-            Debug.Log($"[INFECT DEBUG] {playerName} was human. Antidote had no effect.", target);
+            Debug.Log($"[INFECT DEBUG] Antidote skipped for {GetPlayerName(target)} (not infected).", target);
             return;
         }
 
-        if (target == currentInfectedPlayer)
-        {
-            currentInfectedPlayer = null;
-        }
-
-        target.Cure();
-        target.RefreshInfectionVisual(useObviousDebugInfectedColor);
-
-        DisableBotMovement(target);
-        SetPlayerMovementEnabled(target, false);
+        ApplyVoteCure(target);
 
         if (frozenPlayers.TryGetValue(target, out Coroutine runningCoroutine) && runningCoroutine != null)
         {
@@ -331,6 +362,29 @@ public sealed class InfectionSystem : MonoBehaviour
         }
 
         frozenPlayers[target] = StartCoroutine(FreezeMovementAfterAntidote(target));
+    }
+
+    /// <summary>
+    /// Stops legacy InfectionSystem antidote freeze coroutines so MeetingController owns meeting freeze timing.
+    /// </summary>
+    public void CancelLegacyAntidoteFreeze(PlayerIdentity target)
+    {
+        CancelAntidoteFreezeCoroutine(target);
+    }
+
+    void CancelAntidoteFreezeCoroutine(PlayerIdentity target)
+    {
+        if (target == null)
+        {
+            return;
+        }
+
+        if (frozenPlayers.TryGetValue(target, out Coroutine runningCoroutine) && runningCoroutine != null)
+        {
+            StopCoroutine(runningCoroutine);
+        }
+
+        frozenPlayers.Remove(target);
     }
 
     void HandleDebugHotkeys()
@@ -451,6 +505,74 @@ public sealed class InfectionSystem : MonoBehaviour
         {
             GameEndManager.Instance.CheckLoseConditions();
         }
+
+        // Non-blocking: attempt to register this new bot with Team A backend.
+        TryRegisterBotWithTeamA(target, wave, reason);
+    }
+
+    void TryRegisterBotWithTeamA(PlayerIdentity target, int wave, string reason)
+    {
+        if (target == null) return;
+
+        if (TeamAApiClient.Instance == null)
+        {
+            Debug.Log("[TEAM A API] RegisterBot skipped: TeamAApiClient missing.");
+            return;
+        }
+
+        string botId = GetApiPlayerId(target);
+        if (string.IsNullOrWhiteSpace(botId)) return;
+
+        // Prevent duplicate register attempts for same bot during its infected lifetime.
+        if (registeredBotApiIds.Contains(botId) && target.isInfected)
+        {
+            Debug.Log($"[TEAM A API] RegisterBot skipped: already registered {botId}.");
+            return;
+        }
+
+        registeredBotApiIds.Add(botId);
+
+        RegisterBotRequest request = new RegisterBotRequest
+        {
+            matchId = matchId,
+            botId = botId,
+            botName = GetDisplayName(target),
+            wave = wave,
+            cycle = GetCurrentCycle(),
+            phase = GetCurrentPhaseName(),
+            alivePlayers = GetAlivePlayerApiIds(),
+            humanPlayers = GetHumanPlayerApiIds(),
+            infectedPlayers = GetInfectedPlayerApiIds(),
+            taskProgress = GetCurrentTaskProgress()
+        };
+
+        StartCoroutine(TeamAApiClient.Instance.RegisterBot(request, (ok, response) =>
+        {
+            string playerName = GetDisplayName(target);
+            if (ok && response != null && response.ok)
+            {
+                string personality = string.IsNullOrWhiteSpace(response.personality) ? "(none)" : response.personality;
+                string behavior = string.IsNullOrWhiteSpace(response.behaviorMode) ? "(none)" : response.behaviorMode;
+                Debug.Log($"[TEAM A API] RegisterBot success for {playerName} personality={personality} mode={behavior}");
+                AgentTracePanel.Trace("API", $"Registered {playerName} as Team A bot.");
+
+                // Map and apply behavior mode if available
+                if (!string.IsNullOrWhiteSpace(response.behaviorMode) && TryMapApiBehaviorMode(response.behaviorMode, out BotBehaviorMode mappedMode))
+                {
+                    BotMovement botMovement = target.GetComponent<BotMovement>();
+                    if (botMovement != null)
+                    {
+                        botMovement.SetMode(mappedMode);
+                        botMovement.ResumeBot();
+                    }
+                }
+            }
+            else
+            {
+                Debug.Log($"[TEAM A API] RegisterBot failed/skipped for {playerName}. Local fallback remains active.");
+                AgentTracePanel.Trace("API", $"RegisterBot fallback for {playerName}.");
+            }
+        }));
     }
 
     BotBehaviorMode GetBotModeForWave(int wave)
@@ -800,6 +922,125 @@ public sealed class InfectionSystem : MonoBehaviour
     PlayerIdentity[] GetAllPlayers()
     {
         return PlayerIdentity.GetAllPlayers();
+    }
+
+    // Public helpers for API integration
+    public static string GetApiPlayerId(PlayerIdentity player)
+    {
+        if (player == null) return string.Empty;
+        // PlayerIdentity currently exposes numeric playerId. Compose API id.
+        return "player_" + player.playerId;
+    }
+
+    public static string GetDisplayName(PlayerIdentity player)
+    {
+        if (player == null) return string.Empty;
+        if (!string.IsNullOrWhiteSpace(player.playerName)) return player.playerName;
+        return "Player " + player.playerId;
+    }
+
+    // Snapshot helpers used for API requests
+    string[] GetAlivePlayerApiIds()
+    {
+        PlayerIdentity[] all = GetAllPlayers();
+        if (all == null) return new string[0];
+        List<string> ids = new List<string>();
+        for (int i = 0; i < all.Length; i++)
+        {
+            PlayerIdentity p = all[i];
+            if (p == null) continue;
+            if (p.isAlive) ids.Add(GetApiPlayerId(p));
+        }
+        return ids.ToArray();
+    }
+
+    string[] GetHumanPlayerApiIds()
+    {
+        PlayerIdentity[] all = GetAllPlayers();
+        if (all == null) return new string[0];
+        List<string> ids = new List<string>();
+        for (int i = 0; i < all.Length; i++)
+        {
+            PlayerIdentity p = all[i];
+            if (p == null) continue;
+            if (p.isAlive && !p.isInfected) ids.Add(GetApiPlayerId(p));
+        }
+        return ids.ToArray();
+    }
+
+    string[] GetInfectedPlayerApiIds()
+    {
+        PlayerIdentity[] all = GetAllPlayers();
+        if (all == null) return new string[0];
+        List<string> ids = new List<string>();
+        for (int i = 0; i < all.Length; i++)
+        {
+            PlayerIdentity p = all[i];
+            if (p == null) continue;
+            if (p.isInfected) ids.Add(GetApiPlayerId(p));
+        }
+        return ids.ToArray();
+    }
+
+    int GetCurrentTaskProgress()
+    {
+        if (TaskManager.Instance != null)
+        {
+            return Mathf.RoundToInt(TaskManager.Instance.taskProgress * 100f);
+        }
+        return 0;
+    }
+
+    string GetCurrentPhaseName()
+    {
+        return GameManager.CurrentPhase.ToString();
+    }
+
+    int GetCurrentWave()
+    {
+        return GameManager.CurrentWave;
+    }
+
+    int GetCurrentCycle()
+    {
+        // Prototype: cycles not implemented yet
+        return 1;
+    }
+
+    // Allow external removal when a player is cured/unregistered
+    public void RemoveRegisteredBotApiId(string botId)
+    {
+        if (string.IsNullOrWhiteSpace(botId)) return;
+        registeredBotApiIds.Remove(botId);
+    }
+
+    // Map API behavior mode strings to local BotBehaviorMode
+    bool TryMapApiBehaviorMode(string apiMode, out BotBehaviorMode mode)
+    {
+        mode = BotBehaviorMode.FakeTask;
+        if (string.IsNullOrWhiteSpace(apiMode)) return false;
+
+        switch (apiMode)
+        {
+            case "stealth_fake_task":
+                mode = BotBehaviorMode.FakeTask;
+                return true;
+            case "stalk":
+                mode = BotBehaviorMode.Stalk;
+                return true;
+            case "aggressive_chase":
+                mode = BotBehaviorMode.AggressiveChase;
+                return true;
+            case "final_hunt":
+                mode = BotBehaviorMode.FinalHunt;
+                return true;
+            case "frozen":
+            case "idle":
+                // No direct mapping; keep existing mode
+                return false;
+            default:
+                return false;
+        }
     }
 
     PlayerIdentity FindPlayerById(PlayerIdentity[] allPlayers, int playerId)

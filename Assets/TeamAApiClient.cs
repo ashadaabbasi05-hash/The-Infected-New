@@ -22,6 +22,9 @@ public class TeamAApiClient : MonoBehaviour
     [SerializeField] private bool debugLogs = true;
     [SerializeField] private bool traceToAgentPanel = true;
 
+    // Expose read-only flag for external callers to check if API calls are enabled
+    public bool EnableApiCalls => enableApiCalls;
+
     private void Awake()
     {
         if (Instance != null && Instance != this)

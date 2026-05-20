@@ -15,6 +15,7 @@ public class PlayerMovement : MonoBehaviour
     public float inputSmoothing = 15f;
 
     Rigidbody2D rb;
+    PlayerIdentity identity;
 
     Vector2 input;
     Vector2 smoothedInput;
@@ -28,10 +29,24 @@ public class PlayerMovement : MonoBehaviour
     void Awake()
     {
         rb = GetComponent<Rigidbody2D>();
+        identity = GetComponent<PlayerIdentity>();
+    }
+
+    bool IsMovementBlocked()
+    {
+        return identity != null && identity.isFrozen;
     }
 
     void Update()
     {
+        if (IsMovementBlocked())
+        {
+            input = Vector2.zero;
+            smoothedInput = Vector2.zero;
+            sprint = false;
+            return;
+        }
+
         ReadInput();
         HandleDashTimers();
         if ((Input.GetKeyDown(KeyCode.Space) || Input.GetButtonDown("Jump")) && dashCooldownTimer <= 0f && input.sqrMagnitude > 0.01f)
@@ -42,6 +57,17 @@ public class PlayerMovement : MonoBehaviour
 
     void FixedUpdate()
     {
+        if (IsMovementBlocked())
+        {
+            if (rb != null)
+            {
+                rb.linearVelocity = Vector2.zero;
+            }
+
+            isDashing = false;
+            return;
+        }
+
         if (isDashing)
         {
             rb.linearVelocity = dashDir * dashSpeed;

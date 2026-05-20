@@ -15,6 +15,7 @@ public sealed class PlayerIdentity : MonoBehaviour
     [field: Tooltip("True when this object belongs to the local player.")]
     [field: SerializeField]
     public bool isLocalPlayer { get; private set; }
+    public bool IsLocalPlayer => isLocalPlayer;
 
     [field: Header("State")]
     [field: Tooltip("True when the player is alive and able to act.")]
@@ -33,6 +34,10 @@ public sealed class PlayerIdentity : MonoBehaviour
     [field: SerializeField]
     public bool isFrozen { get; private set; }
 
+    [Header("Antidote Freeze Visual")]
+    [SerializeField] bool useFreezeTint = true;
+    [SerializeField] Color freezeColor = new Color32(99, 190, 210, 255);
+
     [Header("Visuals")]
     [Tooltip("If true, the SpriteRenderer's color on Awake becomes the normalColor. Otherwise, normalColor is white.")]
     [SerializeField] bool useOriginalColorAsNormal = true;
@@ -44,6 +49,7 @@ public sealed class PlayerIdentity : MonoBehaviour
     [SerializeField] Color infectedColor = new Color32(139, 26, 26, 255);
 
     PlayerMovement playerMovement;
+    Rigidbody2D rb;
     SpriteRenderer spriteRenderer;
     Color originalSpriteColor;
     bool hasOriginalSpriteColor;
@@ -53,6 +59,7 @@ public sealed class PlayerIdentity : MonoBehaviour
     void Awake()
     {
         playerMovement = GetComponent<PlayerMovement>();
+        rb = GetComponent<Rigidbody2D>();
         spriteRenderer = GetComponent<SpriteRenderer>();
 
         // Capture the artist-authored sprite color once so Cure() can restore it.
@@ -166,13 +173,67 @@ public sealed class PlayerIdentity : MonoBehaviour
         }
     }
 
-    void ApplyControlState()
+    public void ApplyControlState()
     {
-        SetMovementEnabled(isAlive && isLocalPlayer && !isAIControlled && !isFrozen);
-        SetBotMovementEnabled(isAlive && isAIControlled && !isFrozen);
+        if (!isAlive)
+        {
+            SetMovementEnabled(false);
+            SetBotMovementEnabled(false);
+            StopRigidbody();
+            return;
+        }
+
+        if (isFrozen)
+        {
+            SetMovementEnabled(false);
+            SetBotMovementEnabled(false);
+            StopRigidbody();
+            return;
+        }
+
+        if (isInfected || isAIControlled)
+        {
+            SetMovementEnabled(false);
+            SetBotMovementEnabled(true);
+            return;
+        }
+
+        if (isLocalPlayer)
+        {
+            SetMovementEnabled(true);
+            SetBotMovementEnabled(false);
+            return;
+        }
+
+        SetMovementEnabled(false);
+        SetBotMovementEnabled(false);
+    }
+
+    void StopRigidbody()
+    {
+        if (rb == null)
+        {
+            rb = GetComponent<Rigidbody2D>();
+        }
+
+        if (rb != null)
+        {
+            rb.linearVelocity = Vector2.zero;
+        }
+    }
+
+    /// <summary>Prototype helper so MeetingController can enforce a single local player.</summary>
+    public void SetLocalPlayerForPrototype(bool value)
+    {
+        isLocalPlayer = value;
     }
 
     public void FreezePlayer()
+    {
+        FreezePlayer("Unknown");
+    }
+
+    public void FreezePlayer(string reason)
     {
         if (isFrozen)
         {
@@ -180,7 +241,21 @@ public sealed class PlayerIdentity : MonoBehaviour
         }
 
         isFrozen = true;
+
+        if (rb == null)
+        {
+            rb = GetComponent<Rigidbody2D>();
+        }
+
+        if (rb != null)
+        {
+            rb.linearVelocity = Vector2.zero;
+        }
+
         ApplyControlState();
+        ApplyFreezeVisual(true);
+        Debug.Log($"[FREEZE DEBUG] FreezePlayer called on {GetDisplayName()} by {reason}", this);
+        Debug.Log($"[FREEZE DEBUG] Local player frozen? {isLocalPlayer} reason={reason}", this);
         Debug.Log($"[ANTIDOTE] {GetDisplayName()} frozen.", this);
     }
 
@@ -192,8 +267,14 @@ public sealed class PlayerIdentity : MonoBehaviour
         }
 
         isFrozen = false;
-        ApplyControlState();
+        RefreshControlState();
+        ApplyFreezeVisual(false);
         Debug.Log($"[ANTIDOTE] {GetDisplayName()} unfrozen.", this);
+    }
+
+    public void RefreshControlState()
+    {
+        ApplyControlState();
     }
 
     string GetDisplayName()
@@ -230,5 +311,36 @@ public sealed class PlayerIdentity : MonoBehaviour
         spriteRenderer.color = infected
             ? (useObviousDebugColor ? Color.red : infectedColor)
             : originalSpriteColor;
+
+        if (isFrozen)
+        {
+            ApplyFreezeVisual(true);
+        }
+    }
+
+    void ApplyFreezeVisual(bool frozen)
+    {
+        if (!useFreezeTint)
+        {
+            return;
+        }
+
+        if (spriteRenderer == null)
+        {
+            spriteRenderer = GetComponent<SpriteRenderer>();
+        }
+
+        if (spriteRenderer == null)
+        {
+            return;
+        }
+
+        if (frozen)
+        {
+            spriteRenderer.color = freezeColor;
+            return;
+        }
+
+        ApplyInfectionVisual(isInfected);
     }
 }
