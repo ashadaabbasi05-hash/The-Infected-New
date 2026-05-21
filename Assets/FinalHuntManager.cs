@@ -44,6 +44,7 @@ public sealed class FinalHuntManager : MonoBehaviour
     int lastLoggedAliveInfected = -1;
     int lastLoggedAliveHumans = -1;
     bool warningUiConfigured;
+    bool warningUiPolishedLogged;
     PlayerIdentity trackedLastHuman;
     bool meetingControllerWasEnabledBeforeFinalHunt = true;
     bool meetingControllerWasActiveBeforeFinalHunt = true;
@@ -642,11 +643,15 @@ public sealed class FinalHuntManager : MonoBehaviour
         Image panelImage = finalHuntPanel.GetComponent<Image>();
         if (panelImage != null)
         {
+            panelImage.color = new Color(0.26f, 0.09f, 0.1f, 0.9f);
             panelImage.raycastTarget = false;
         }
 
         if (finalHuntText != null)
         {
+            finalHuntText.fontSize = 44f;
+            finalHuntText.fontStyle = FontStyles.Bold;
+            finalHuntText.color = new Color32(255, 90, 95, 255);
             finalHuntText.raycastTarget = false;
         }
 
@@ -654,6 +659,12 @@ public sealed class FinalHuntManager : MonoBehaviour
         {
             warningUiConfigured = true;
             Debug.Log("[FINAL HUNT] Warning UI configured as non-blocking.", this);
+        }
+
+        if (!warningUiPolishedLogged)
+        {
+            warningUiPolishedLogged = true;
+            Debug.Log("[INGAME UI] Warning overlays polished.", this);
         }
     }
 

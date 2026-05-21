@@ -75,6 +75,7 @@ public sealed class MeetingController : MonoBehaviour
     bool meetingHiddenDuringVotingLogged;
     bool personalAntidotePanelMissingWarningLogged;
     bool personalAntidoteUiWiredLogged;
+    bool publicAntidoteUiPolishedLogged;
 
     PlayerIdentity localVoter;
     PlayerIdentity activeAntidoteTarget;
@@ -697,17 +698,17 @@ public sealed class MeetingController : MonoBehaviour
         panelRect.anchorMax = new Vector2(0.5f, 1f);
         panelRect.pivot = new Vector2(0.5f, 1f);
         panelRect.anchoredPosition = new Vector2(0f, -90f);
-        panelRect.sizeDelta = new Vector2(520f, 90f);
+        panelRect.sizeDelta = new Vector2(620f, 120f);
 
         Image panelImage = panelObject.GetComponent<Image>();
-        panelImage.color = new Color(0.08f, 0.1f, 0.12f, 0.82f);
+        panelImage.color = new Color(0.06f, 0.1f, 0.12f, 0.9f);
         panelImage.raycastTarget = false;
 
         publicAntidoteStatusPanel = panelObject;
         publicAntidoteCanvasGroup = panelObject.GetComponent<CanvasGroup>();
 
-        publicAntidoteStatusText = CreateBannerText(panelObject.transform, "PublicAntidoteStatusText", new Vector2(0f, 18f), 22f, "ANTIDOTE ADMINISTERED");
-        publicAntidoteTimerText = CreateBannerText(panelObject.transform, "PublicAntidoteTimerText", new Vector2(0f, -18f), 18f, "Target frozen: 10s");
+        publicAntidoteStatusText = CreateBannerText(panelObject.transform, "PublicAntidoteStatusText", new Vector2(0f, 26f), 26f, "ANTIDOTE ADMINISTERED");
+        publicAntidoteTimerText = CreateBannerText(panelObject.transform, "PublicAntidoteTimerText", new Vector2(0f, -20f), 22f, "TARGET FROZEN: 10S");
 
         panelObject.SetActive(false);
         ConfigurePublicAntidoteStatusAsNonBlocking();
@@ -724,7 +725,7 @@ public sealed class MeetingController : MonoBehaviour
         rect.anchorMax = new Vector2(0.5f, 0.5f);
         rect.pivot = new Vector2(0.5f, 0.5f);
         rect.anchoredPosition = anchoredPosition;
-        rect.sizeDelta = new Vector2(480f, 36f);
+        rect.sizeDelta = new Vector2(560f, 44f);
 
         TMP_Text text = textObject.GetComponent<TextMeshProUGUI>();
         text.text = defaultText;
@@ -732,6 +733,7 @@ public sealed class MeetingController : MonoBehaviour
         text.alignment = TextAlignmentOptions.Center;
         text.color = Color.white;
         text.raycastTarget = false;
+        text.fontStyle = FontStyles.Bold;
         return text;
     }
 
@@ -827,12 +829,23 @@ public sealed class MeetingController : MonoBehaviour
 
         if (publicAntidoteStatusText != null)
         {
+            publicAntidoteStatusText.fontSize = 26f;
+            publicAntidoteStatusText.color = new Color32(242, 253, 255, 255);
             publicAntidoteStatusText.raycastTarget = false;
         }
 
         if (publicAntidoteTimerText != null)
         {
+            publicAntidoteTimerText.fontSize = 22f;
+            publicAntidoteTimerText.color = new Color32(169, 214, 221, 255);
             publicAntidoteTimerText.raycastTarget = false;
+        }
+
+        if (!publicAntidoteUiPolishedLogged)
+        {
+            publicAntidoteUiPolishedLogged = true;
+            Debug.Log("[INGAME UI] Warning overlays polished.");
+            Debug.Log("[INGAME UI] Meeting/Voting panels polished.");
         }
     }
 
@@ -999,7 +1012,9 @@ public sealed class MeetingController : MonoBehaviour
                 TMP_Text hiddenLabel = button.GetComponentInChildren<TMP_Text>(true);
                 if (hiddenLabel != null)
                 {
-                    hiddenLabel.text = $"Player {expectedPlayerId}";
+                        hiddenLabel.text = $"Player {expectedPlayerId}";
+                        hiddenLabel.fontSize = 24f;
+                        hiddenLabel.fontStyle = FontStyles.Bold;
                 }
 
                 continue;
@@ -1011,11 +1026,21 @@ public sealed class MeetingController : MonoBehaviour
                 Debug.LogWarning("[MEETING DEBUG] Vote button is child of MeetingPanel. It may be hidden when MeetingPanel is hidden.", this);
             }
 
+            // Ensure button size and label styling are mobile-friendly
             string labelText = GetVoteButtonLabel(target, expectedPlayerId);
+            RectTransform btnRect = button.GetComponent<RectTransform>();
+            if (btnRect != null)
+            {
+                btnRect.sizeDelta = new Vector2(220f, 56f);
+            }
+
             TMP_Text label = button.GetComponentInChildren<TMP_Text>(true);
             if (label != null)
             {
                 label.text = labelText;
+                label.fontSize = 28f;
+                label.fontStyle = FontStyles.Bold;
+                label.alignment = TextAlignmentOptions.Center;
             }
 
             int capturedPlayerId = target.playerId;

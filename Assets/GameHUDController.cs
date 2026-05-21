@@ -9,8 +9,13 @@ public sealed class GameHUDController : MonoBehaviour
     [SerializeField] TMP_Text timerText;
 
     [Header("Formatting")]
-    [SerializeField] string phasePrefix = "Phase: ";
-    [SerializeField] string waveFormat = "{0}/{1}";
+    [SerializeField] string phasePrefix = "PHASE: ";
+    [SerializeField] string waveFormat = "WAVE: {0}/{1}";
+
+    static readonly Color32 PhaseColor = new Color32(242, 253, 255, 255);
+    static readonly Color32 WaveColor = new Color32(169, 214, 221, 255);
+    static readonly Color32 TimerColor = new Color32(169, 214, 221, 255);
+    static readonly Color32 TimerWarningColor = new Color32(255, 90, 95, 255);
 
     GameManager gameManager;
     int lastDisplayedSecond = int.MinValue;
@@ -107,9 +112,24 @@ public sealed class GameHUDController : MonoBehaviour
     {
         if (gameManager == null)
         {
-            if (phaseText != null) phaseText.text = "Phase: --";
-            if (waveText != null) waveText.SetText(waveFormat, 0, 3);
-            if (timerText != null) timerText.text = "0";
+            if (phaseText != null)
+            {
+                phaseText.text = "PHASE: --";
+                phaseText.color = PhaseColor;
+            }
+
+            if (waveText != null)
+            {
+                waveText.SetText(waveFormat, 0, 3);
+                waveText.color = WaveColor;
+            }
+
+            if (timerText != null)
+            {
+                timerText.text = "TIME: 0";
+                timerText.color = TimerColor;
+            }
+
             return;
         }
 
@@ -124,7 +144,9 @@ public sealed class GameHUDController : MonoBehaviour
     {
         if (phaseText == null) return;
 
-        phaseText.text = string.Concat(phasePrefix, phase.ToString());
+        phaseText.text = string.Concat(phasePrefix, GetPhaseLabel(phase));
+        phaseText.color = PhaseColor;
+        phaseText.fontStyle = FontStyles.Bold;
     }
 
     void UpdateWave(int wave)
@@ -133,12 +155,28 @@ public sealed class GameHUDController : MonoBehaviour
 
         int max = GameManager.MaxWaves;
         waveText.SetText(waveFormat, Mathf.Clamp(wave, 0, max), max);
+        waveText.color = WaveColor;
+        waveText.fontStyle = FontStyles.Bold;
     }
 
     void UpdateTimer(int seconds)
     {
         if (timerText == null) return;
 
-        timerText.SetText("{0}s", Mathf.Max(0, seconds));
+        int safeSeconds = Mathf.Max(0, seconds);
+        timerText.SetText("TIME: {0}", safeSeconds);
+        timerText.color = safeSeconds <= 10 ? TimerWarningColor : TimerColor;
+        timerText.fontStyle = FontStyles.Bold;
+    }
+
+    string GetPhaseLabel(GamePhase phase)
+    {
+        int index = (int)phase;
+        if (index >= 0 && index < PhaseLabels.Length)
+        {
+            return PhaseLabels[index].ToUpperInvariant();
+        }
+
+        return phase.ToString().ToUpperInvariant();
     }
 }

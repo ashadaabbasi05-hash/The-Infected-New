@@ -7,6 +7,9 @@ public sealed class ObjectiveHUDController : MonoBehaviour
 {
     public static ObjectiveHUDController Instance { get; private set; }
 
+    static readonly Color32 TopRightColor = new Color32(242, 253, 255, 255);
+    static readonly Color32 BottomRightColor = new Color32(255, 90, 95, 255);
+
     [Header("UI")]
     [SerializeField] TMP_Text topRightObjectiveText;
     [SerializeField] TMP_Text bottomRightFinalHuntText;
@@ -427,6 +430,9 @@ public sealed class ObjectiveHUDController : MonoBehaviour
 
         text.raycastTarget = false;
         text.gameObject.SetActive(true);
+        text.fontStyle = FontStyles.Bold;
+        text.color = TopRightColor;
+        text.enableWordWrapping = true;
     }
 
     void ConfigureBottomRightText(TMP_Text text)
@@ -436,6 +442,8 @@ public sealed class ObjectiveHUDController : MonoBehaviour
 
         text.raycastTarget = false;
         text.gameObject.SetActive(false);
+        text.fontStyle = FontStyles.Bold;
+        text.color = BottomRightColor;
 
         bottomRightCanvasGroup = text.GetComponent<CanvasGroup>();
         if (bottomRightCanvasGroup == null)
@@ -457,7 +465,7 @@ public sealed class ObjectiveHUDController : MonoBehaviour
         }
 
         topRightObjectiveText.gameObject.SetActive(true);
-        topRightObjectiveText.text = text;
+        topRightObjectiveText.text = string.IsNullOrEmpty(text) ? string.Empty : text.ToUpperInvariant();
         topRightObjectiveText.raycastTarget = false;
     }
 
@@ -558,7 +566,7 @@ public sealed class ObjectiveHUDController : MonoBehaviour
         ForceConfigureBottomRightText();
         bottomRightFinalHuntText.gameObject.SetActive(visible);
         bottomRightFinalHuntText.enabled = true;
-        bottomRightFinalHuntText.text = "FINAL HUNT";
+        bottomRightFinalHuntText.text = "FINAL HUNT\nRUN. THEY KNOW.";
         bottomRightFinalHuntText.raycastTarget = false;
 
         if (bottomRightCanvasGroup != null)
@@ -716,13 +724,15 @@ public sealed class ObjectiveHUDController : MonoBehaviour
         rectTransform.anchorMin = new Vector2(1f, 0f);
         rectTransform.anchorMax = new Vector2(1f, 0f);
         rectTransform.pivot = new Vector2(1f, 0f);
-        rectTransform.anchoredPosition = new Vector2(-40f, 120f);
-        rectTransform.sizeDelta = new Vector2(300f, 80f);
+        rectTransform.anchoredPosition = new Vector2(-40f, 180f);
+        rectTransform.sizeDelta = new Vector2(420f, 96f);
 
         bottomRightFinalHuntText.enabled = true;
         bottomRightFinalHuntText.gameObject.SetActive(true);
-        bottomRightFinalHuntText.text = "FINAL HUNT";
+        bottomRightFinalHuntText.text = "FINAL HUNT\nRUN. THEY KNOW.";
         bottomRightFinalHuntText.raycastTarget = false;
+        bottomRightFinalHuntText.fontStyle = FontStyles.Bold;
+        bottomRightFinalHuntText.color = BottomRightColor;
 
         Color color = bottomRightFinalHuntText.color;
         color.a = 1f;

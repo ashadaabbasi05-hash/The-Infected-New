@@ -39,6 +39,7 @@ public sealed class MobileActionButtonsController : MonoBehaviour
     int interactPressSequence;
     int suppressClickSequence = -1;
     float lastInteractPressedTime;
+    bool mobileControlsPolishedLogged;
 
     void Awake()
     {
@@ -58,6 +59,12 @@ public sealed class MobileActionButtonsController : MonoBehaviour
 
         SetupButtonLabels();
         SetupListeners();
+
+        if (!mobileControlsPolishedLogged)
+        {
+            mobileControlsPolishedLogged = true;
+            Debug.Log("[INGAME UI] Mobile controls polished.");
+        }
     }
 
     void OnDestroy()

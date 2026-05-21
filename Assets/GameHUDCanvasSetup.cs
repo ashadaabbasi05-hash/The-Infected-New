@@ -6,6 +6,11 @@ using UnityEngine.UI;
 [DisallowMultipleComponent]
 public class GameHUDCanvasSetup : MonoBehaviour
 {
+    static readonly Color32 PanelColor = new Color32(16, 24, 32, 230);
+    static readonly Color32 PrimaryTextColor = new Color32(242, 253, 255, 255);
+    static readonly Color32 SecondaryTextColor = new Color32(169, 214, 221, 255);
+    static readonly Color32 WarningTextColor = new Color32(255, 90, 95, 255);
+
     [Header("Controller")]
     [SerializeField] GameHUDController hudController;
     [SerializeField] ObjectiveHUDController objectiveHUDController;
@@ -34,6 +39,8 @@ public class GameHUDCanvasSetup : MonoBehaviour
             go.AddComponent<GraphicRaycaster>();
         }
 
+        ConfigureCanvas(canvas);
+
         if (hudController == null)
         {
             hudController = canvas.GetComponentInChildren<GameHUDController>(true);
@@ -46,19 +53,53 @@ public class GameHUDCanvasSetup : MonoBehaviour
             hudController = hudRoot.AddComponent<GameHUDController>();
         }
 
-        TMP_Text phaseText = FindOrCreateText(canvas.transform, phaseTextName, 0);
-        TMP_Text waveText = FindOrCreateText(canvas.transform, waveTextName, 1);
-        TMP_Text timerText = FindOrCreateText(canvas.transform, timerTextName, 2);
+        Transform topLeftPanel = FindOrCreatePanel(
+            canvas.transform,
+            "TopLeftStatusPanel",
+            new Vector2(0f, 1f),
+            new Vector2(0f, 1f),
+            new Vector2(0f, 1f),
+            new Vector2(40f, -40f),
+            new Vector2(500f, 240f),
+            PanelColor);
+
+        TMP_Text phaseText = FindOrCreateText(topLeftPanel, phaseTextName, 0);
+        TMP_Text waveText = FindOrCreateText(topLeftPanel, waveTextName, 1);
+        TMP_Text timerText = FindOrCreateText(topLeftPanel, timerTextName, 2);
+
+        ConfigureStatusText(phaseText, new Vector2(24f, -34f), new Vector2(440f, 48f), 38f, TextAlignmentOptions.TopLeft, PrimaryTextColor, true);
+        ConfigureStatusText(waveText, new Vector2(24f, -100f), new Vector2(440f, 44f), 32f, TextAlignmentOptions.TopLeft, SecondaryTextColor, true);
+        ConfigureStatusText(timerText, new Vector2(24f, -164f), new Vector2(440f, 52f), 38f, TextAlignmentOptions.TopLeft, SecondaryTextColor, true);
+
+        phaseText.text = "PHASE: EXPLORATION";
+        waveText.text = "WAVE: 0/3";
+        timerText.text = "TIME: 60";
 
         hudController.SetPhaseText(phaseText);
         hudController.SetWaveText(waveText);
         hudController.SetTimerText(timerText);
 
-        TMP_Text topRightObjectiveText = FindOrCreateText(canvas.transform, topRightObjectiveTextName, new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-30f, -80f), new Vector2(420f, 60f), TextAlignmentOptions.TopRight, 24f);
+        Transform objectivePanel = FindOrCreatePanel(
+            canvas.transform,
+            "ObjectivePanel",
+            new Vector2(1f, 1f),
+            new Vector2(1f, 1f),
+            new Vector2(1f, 1f),
+            new Vector2(-40f, -40f),
+            new Vector2(620f, 220f),
+            new Color32(13, 27, 34, 230));
+
+        TMP_Text objectiveTitleText = FindOrCreateText(objectivePanel, "ObjectiveTitleText", new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-24f, -24f), new Vector2(220f, 34f), TextAlignmentOptions.TopRight, 26f);
+        ConfigureStatusText(objectiveTitleText, new Vector2(-24f, -24f), new Vector2(220f, 34f), 26f, TextAlignmentOptions.TopRight, SecondaryTextColor, true);
+        objectiveTitleText.text = "OBJECTIVE";
+
+        TMP_Text topRightObjectiveText = FindOrCreateText(objectivePanel, topRightObjectiveTextName, new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-24f, -86f), new Vector2(560f, 120f), TextAlignmentOptions.TopRight, 36f);
+        ConfigureStatusText(topRightObjectiveText, new Vector2(-24f, -86f), new Vector2(560f, 120f), 36f, TextAlignmentOptions.TopRight, PrimaryTextColor, false);
         topRightObjectiveText.text = "Tasks Remaining: 0";
         topRightObjectiveText.raycastTarget = false;
 
-        TMP_Text bottomRightFinalHuntText = FindOrCreateText(canvas.transform, bottomRightFinalHuntTextName, new Vector2(1f, 0f), new Vector2(1f, 0f), new Vector2(1f, 0f), new Vector2(-30f, 160f), new Vector2(360f, 48f), TextAlignmentOptions.BottomRight, 24f);
+        TMP_Text bottomRightFinalHuntText = FindOrCreateText(canvas.transform, bottomRightFinalHuntTextName, new Vector2(1f, 0f), new Vector2(1f, 0f), new Vector2(1f, 0f), new Vector2(-40f, 180f), new Vector2(420f, 84f), TextAlignmentOptions.BottomRight, 40f);
+        ConfigureStatusText(bottomRightFinalHuntText, new Vector2(-40f, 180f), new Vector2(420f, 84f), 40f, TextAlignmentOptions.BottomRight, WarningTextColor, true);
         bottomRightFinalHuntText.text = "FINAL HUNT";
         bottomRightFinalHuntText.raycastTarget = false;
 
@@ -121,11 +162,99 @@ public class GameHUDCanvasSetup : MonoBehaviour
         objectiveHUDController.Initialize(topRightObjectiveText, bottomRightFinalHuntText);
         objectiveHUDController.RefreshObjectiveText();
         Debug.Log("[HUD SETUP] Objective HUD wired successfully.");
+        Debug.Log("[INGAME UI] HUD canvas configured.");
+        Debug.Log("[INGAME UI] Objective HUD polished.");
+    }
+
+    void ConfigureCanvas(Canvas canvas)
+    {
+        if (canvas == null)
+        {
+            return;
+        }
+
+        canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+        canvas.sortingOrder = 40;
+
+        CanvasScaler scaler = canvas.GetComponent<CanvasScaler>();
+        if (scaler == null)
+        {
+            scaler = canvas.gameObject.AddComponent<CanvasScaler>();
+        }
+
+        scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+        scaler.referenceResolution = new Vector2(1080f, 1920f);
+        scaler.screenMatchMode = CanvasScaler.ScreenMatchMode.MatchWidthOrHeight;
+        scaler.matchWidthOrHeight = 0.5f;
+
+        GraphicRaycaster raycaster = canvas.GetComponent<GraphicRaycaster>();
+        if (raycaster == null)
+        {
+            canvas.gameObject.AddComponent<GraphicRaycaster>();
+        }
     }
 
     TMP_Text FindOrCreateText(Transform parent, string childName, int lineIndex)
     {
         return FindOrCreateText(parent, childName, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(20f, -20f - (28f * lineIndex)), new Vector2(360f, 30f), TextAlignmentOptions.Left, 22f);
+    }
+
+    Transform FindOrCreatePanel(Transform parent, string childName, Vector2 anchorMin, Vector2 anchorMax, Vector2 pivot, Vector2 anchoredPosition, Vector2 sizeDelta, Color color)
+    {
+        Transform existing = FindChildRecursive(parent, childName);
+        GameObject panelObject = existing != null ? existing.gameObject : new GameObject(childName, typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(CanvasGroup));
+
+        if (existing == null)
+        {
+            panelObject.transform.SetParent(parent, false);
+        }
+
+        RectTransform rect = panelObject.GetComponent<RectTransform>();
+        rect.anchorMin = anchorMin;
+        rect.anchorMax = anchorMax;
+        rect.pivot = pivot;
+        rect.anchoredPosition = anchoredPosition;
+        rect.sizeDelta = sizeDelta;
+
+        Image image = panelObject.GetComponent<Image>();
+        if (image == null)
+        {
+            image = panelObject.AddComponent<Image>();
+        }
+
+        image.color = color;
+        image.raycastTarget = false;
+
+        CanvasGroup canvasGroup = panelObject.GetComponent<CanvasGroup>();
+        if (canvasGroup == null)
+        {
+            canvasGroup = panelObject.AddComponent<CanvasGroup>();
+        }
+
+        canvasGroup.alpha = 1f;
+        canvasGroup.blocksRaycasts = false;
+        canvasGroup.interactable = false;
+
+        return panelObject.transform;
+    }
+
+    static void ConfigureStatusText(TMP_Text text, Vector2 anchoredPosition, Vector2 sizeDelta, float fontSize, TextAlignmentOptions alignment, Color color, bool bold)
+    {
+        if (text == null)
+        {
+            return;
+        }
+
+        RectTransform rect = text.rectTransform;
+        rect.anchoredPosition = anchoredPosition;
+        rect.sizeDelta = sizeDelta;
+
+        text.alignment = alignment;
+        text.fontSize = fontSize;
+        text.fontStyle = bold ? FontStyles.Bold : FontStyles.Normal;
+        text.color = color;
+        text.raycastTarget = false;
+        text.enableWordWrapping = false;
     }
 
     ObjectiveHUDController FindControllerByExactName(Transform parent, string childName)
