@@ -1079,12 +1079,42 @@ public sealed class GameFlowManager : MonoBehaviour
 
     public void StartMatchAsHost()
     {
-        if (debugLogs) Debug.Log("[FLOW] Host start match requested.");
-        if (firebaseClient != null && firebaseClient.IsFirebaseReady && firebaseClient.IsJoined)
+        bool firebaseEnabled = firebaseClient != null && firebaseClient.FirebaseEnabled;
+        bool firebaseReady = firebaseClient != null && firebaseClient.IsFirebaseReady;
+        bool isJoined = firebaseClient != null && firebaseClient.IsJoined;
+        bool isHost = firebaseClient != null && firebaseClient.IsHost;
+        string room = firebaseClient != null ? firebaseClient.CurrentRoomCode : defaultRoomCode;
+        string localPlayerId = firebaseClient != null ? firebaseClient.LocalPlayerId : defaultPlayerId;
+
+        if (debugLogs)
         {
+            Debug.Log($"[FLOW] Host start match requested. isJoined={isJoined} isHost={isHost} firebaseReady={firebaseReady} room={room} localPlayerId={localPlayerId}");
+        }
+
+        if (!firebaseEnabled)
+        {
+            StartInGame();
+            return;
+        }
+
+        if (firebaseReady && isJoined)
+        {
+            if (!isHost)
+            {
+                Debug.LogWarning("[FLOW] StartMatch blocked because local client is not host.");
+                return;
+            }
+
             firebaseClient.StartMatch();
             return;
         }
+
+        if (firebaseEnabled && !isJoined)
+        {
+            Debug.LogWarning("[FLOW] StartMatch blocked because local client is not joined yet.");
+            return;
+        }
+
         StartInGame();
     }
 
@@ -1095,6 +1125,11 @@ public sealed class GameFlowManager : MonoBehaviour
 
         // Hide Team A entry screens
         HideTeamAEntryScreens();
+
+        if (lobbyPanel != null)
+        {
+            lobbyPanel.SetActive(false);
+        }
 
         // Hide flow canvas
         if (gameFlowCanvasObject != null)
@@ -1208,10 +1243,28 @@ public sealed class GameFlowManager : MonoBehaviour
 
     void UpdateLobbyButtons()
     {
-        bool canHostStart = firebaseClient == null || !firebaseClient.IsFirebaseReady || firebaseClient.IsHost;
-        if (startMatchButton != null) startMatchButton.interactable = canHostStart;
+        bool firebaseReady = firebaseClient != null && firebaseClient.IsFirebaseReady;
+        bool localIsHost = firebaseClient == null || !firebaseReady || firebaseClient.IsHost;
+        bool canHostStart = firebaseClient == null || !firebaseReady || (firebaseClient.IsJoined && firebaseClient.IsHost);
+
+        if (startMatchButton != null)
+        {
+            startMatchButton.interactable = canHostStart;
+            startMatchButton.gameObject.SetActive(localIsHost || !firebaseReady);
+        }
+
         if (startMatchButtonLabel != null)
             startMatchButtonLabel.color = canHostStart ? new Color32(255, 245, 245, 255) : new Color32(185, 185, 190, 255);
+
+        if (!localIsHost && firebaseReady)
+        {
+            SetLobbyStatus("WAITING FOR HOST TO START");
+        }
+
+        if (debugLogs)
+        {
+            Debug.Log($"[FLOW] Lobby host status localIsHost={localIsHost} startButtonInteractable={canHostStart}");
+        }
     }
 
     void SetActivePanel(GameObject active)

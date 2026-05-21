@@ -33,6 +33,7 @@ public sealed class FirebaseMultiplayerClient : MonoBehaviour
     [SerializeField] Transform remotePlayersParent;
 
     public bool IsHost { get; private set; }
+    public bool FirebaseEnabled => enableFirebase;
     public string CurrentRoomCode => roomCode;
     public string LocalPlayerId => localPlayerId;
     public string DisplayName => displayName;
@@ -56,7 +57,7 @@ public sealed class FirebaseMultiplayerClient : MonoBehaviour
     string pendingRoomCode;
     string pendingPlayerId;
     bool localReady;
-    bool hasAnnouncedMatchStartFromFirebase;
+    bool matchStartEventRaised;
     bool matchHasStartedLocally;
 
     public bool IsFirebaseReady
@@ -253,7 +254,7 @@ public sealed class FirebaseMultiplayerClient : MonoBehaviour
         localPlayerId = NormalizeFirebasePlayerId(localPlayerId);
         displayName = NormalizeDisplayName(displayName, localPlayerId);
         localReady = false;
-        hasAnnouncedMatchStartFromFirebase = false;
+        matchStartEventRaised = false;
         matchHasStartedLocally = false;
 
         CacheLocalReferences();
@@ -305,7 +306,7 @@ public sealed class FirebaseMultiplayerClient : MonoBehaviour
         localPlayerId = NormalizeFirebasePlayerId(playerId);
         displayName = NormalizeDisplayName(displayName, localPlayerId);
         localReady = false;
-        hasAnnouncedMatchStartFromFirebase = false;
+        matchStartEventRaised = false;
         matchHasStartedLocally = false;
 
         CacheLocalReferences();
@@ -334,9 +335,6 @@ public sealed class FirebaseMultiplayerClient : MonoBehaviour
         }
 
 #if FIREBASE_ENABLED
-        joined = true;
-        IsHost = false;
-
         if (rootRef == null)
         {
             return;
@@ -344,13 +342,24 @@ public sealed class FirebaseMultiplayerClient : MonoBehaviour
 
         SetupFirebaseRoomReferences();
 
-        WriteRoomMeta(false);
-        WriteLobbyState();
-        AttachFirebaseListeners();
-        PublishLocalPlayerState();
-        EmitLocalLobbyPlayersChanged();
-        OnRoomJoined?.Invoke(roomCode);
-        Debug.Log($"[FIREBASE] Joined room {roomCode} as {localPlayerId}.", this);
+        if (stateRef == null)
+        {
+            FinalizeJoinRoom(false);
+            return;
+        }
+
+        stateRef.GetValueAsync().ContinueWithOnMainThread(task =>
+        {
+            bool roomAlreadyStarted = false;
+
+            if (!task.IsFaulted && !task.IsCanceled && task.Result != null && task.Result.Exists)
+            {
+                FirebaseMatchState existingState = DeserializeMatchState(task.Result);
+                roomAlreadyStarted = IsMatchStartedState(existingState);
+            }
+
+            FinalizeJoinRoom(roomAlreadyStarted);
+        });
 #endif
     }
 
@@ -361,7 +370,7 @@ public sealed class FirebaseMultiplayerClient : MonoBehaviour
         joined = false;
         IsHost = false;
         localReady = false;
-        hasAnnouncedMatchStartFromFirebase = false;
+        matchStartEventRaised = false;
         matchHasStartedLocally = false;
 
         ClearRemotePlayers();
@@ -547,15 +556,17 @@ public sealed class FirebaseMultiplayerClient : MonoBehaviour
             return;
         }
 
+        Debug.Log($"[FIREBASE] StartMatch requested. joined={IsJoined} isHost={IsHost} room={roomCode} localPlayerId={localPlayerId}", this);
+
         if (!IsJoined)
         {
-            Debug.LogWarning("[FIREBASE] Non-host attempted StartMatch.", this);
+            Debug.LogWarning("[FIREBASE] StartMatch blocked: not joined.", this);
             return;
         }
 
         if (!IsHost)
         {
-            Debug.LogWarning("[FIREBASE] Non-host attempted StartMatch.", this);
+            Debug.Log("[FIREBASE] Non-host attempted StartMatch.", this);
             return;
         }
 
@@ -573,20 +584,42 @@ public sealed class FirebaseMultiplayerClient : MonoBehaviour
             TryInitializeFirebaseBindings();
         }
 
+        List<System.Threading.Tasks.Task> writeTasks = new List<System.Threading.Tasks.Task>();
+
         if (stateRef != null)
         {
-            stateRef.Child("gameStarted").SetValueAsync(true);
-            stateRef.Child("phase").SetValueAsync("ExplorationA");
-            stateRef.Child("status").SetValueAsync("in_game");
-            stateRef.Child("phaseStartedAt").SetValueAsync(Firebase.Database.ServerValue.Timestamp);
+            Dictionary<string, object> stateUpdate = new Dictionary<string, object>
+            {
+                { "gameStarted", true },
+                { "phase", "ExplorationA" },
+                { "status", "in_game" },
+                { "phaseStartedAt", Firebase.Database.ServerValue.Timestamp }
+            };
+
+            writeTasks.Add(stateRef.UpdateChildrenAsync(stateUpdate));
         }
 
         if (metaRef != null)
         {
-            metaRef.Child("status").SetValueAsync("in_game");
+            writeTasks.Add(metaRef.Child("status").SetValueAsync("in_game"));
         }
 
-        Debug.Log($"[FIREBASE] Match start written for {roomCode}.", this);
+        if (writeTasks.Count == 0)
+        {
+            Debug.LogWarning("[FIREBASE] StartMatch write skipped: no Firebase references available.", this);
+            return;
+        }
+
+        System.Threading.Tasks.Task.WhenAll(writeTasks).ContinueWithOnMainThread(task =>
+        {
+            if (task.IsFaulted || task.IsCanceled)
+            {
+                Debug.LogWarning("[FIREBASE] Match start write failed: " + (task.Exception != null ? task.Exception.ToString() : "canceled"), this);
+                return;
+            }
+
+            Debug.Log($"[FIREBASE] Match start written for {roomCode}.", this);
+        });
 #else
         Debug.Log($"[FIREBASE] Match start written for {roomCode}.", this);
 #endif
@@ -782,13 +815,91 @@ public sealed class FirebaseMultiplayerClient : MonoBehaviour
         {
             if (ShouldAnnounceMatchStart(state))
             {
+                Debug.Log($"[FIREBASE] Match start detected from Firebase. phase={state.phase} gameStarted={state.gameStarted} status={state.status}", this);
                 OnMatchStartedFromFirebase?.Invoke(state.phase);
+            }
+        });
+    }
+
+    void FinalizeJoinRoom(bool roomAlreadyStarted)
+    {
+        joined = true;
+        IsHost = false;
+
+        if (!roomAlreadyStarted)
+        {
+            WriteRoomMeta(false);
+            WriteLobbyState();
+        }
+
+        AttachFirebaseListeners();
+        PublishLocalPlayerState();
+        EmitLocalLobbyPlayersChanged();
+        OnRoomJoined?.Invoke(roomCode);
+
+        if (roomAlreadyStarted)
+        {
+            CheckCurrentMatchStateOnce();
+        }
+
+        Debug.Log($"[FIREBASE] Joined room {roomCode} as {localPlayerId}.", this);
+    }
+
+    static bool IsMatchStartedState(FirebaseMatchState state)
+    {
+        if (state == null)
+        {
+            return false;
+        }
+
+        return state.gameStarted
+            || string.Equals(state.status, "in_game", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(state.phase, "ExplorationA", StringComparison.OrdinalIgnoreCase);
+    }
+
+    void CheckCurrentMatchStateOnce()
+    {
+        if (!enableFirebase || !initialized || stateRef == null)
+        {
+            return;
+        }
+
+#if FIREBASE_ENABLED
+        stateRef.GetValueAsync().ContinueWithOnMainThread(task =>
+        {
+            if (task.IsFaulted || task.IsCanceled)
+            {
                 if (debugLogs)
                 {
-                    Debug.Log($"[FIREBASE] Match start detected from Firebase. phase={state.phase}", this);
+                    Debug.LogWarning($"[FIREBASE] Existing match state snapshot failed: {task.Exception}", this);
+                }
+                return;
+            }
+
+            DataSnapshot snapshot = task.Result;
+            if (snapshot == null || !snapshot.Exists)
+            {
+                return;
+            }
+
+            FirebaseMatchState state = DeserializeMatchState(snapshot);
+            if (state == null)
+            {
+                return;
+            }
+
+            if (IsMatchStartedState(state))
+            {
+                Debug.Log($"[FIREBASE] Existing match already started. Entering game. phase={state.phase}", this);
+
+                if (!matchStartEventRaised)
+                {
+                    matchStartEventRaised = true;
+                    OnMatchStartedFromFirebase?.Invoke(state.phase);
                 }
             }
         });
+#endif
     }
 
     FirebasePlayerState DeserializePlayerState(DataSnapshot snapshot)
@@ -955,18 +1066,20 @@ public sealed class FirebaseMultiplayerClient : MonoBehaviour
             return false;
         }
 
-        bool started = state.gameStarted || (!string.IsNullOrWhiteSpace(state.phase) && !string.Equals(state.phase, "Lobby", StringComparison.OrdinalIgnoreCase));
+        bool started = state.gameStarted
+            || string.Equals(state.status, "in_game", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(state.phase, "ExplorationA", StringComparison.OrdinalIgnoreCase);
         if (!started)
         {
             return false;
         }
 
-        if (hasAnnouncedMatchStartFromFirebase)
+        if (matchStartEventRaised)
         {
             return false;
         }
 
-        hasAnnouncedMatchStartFromFirebase = true;
+        matchStartEventRaised = true;
         return true;
     }
 
@@ -1124,6 +1237,7 @@ public sealed class FirebaseMultiplayerClient : MonoBehaviour
         {
             gameStarted = matchHasStartedLocally,
             phase = GetPublishedPhaseName(),
+            status = matchHasStartedLocally ? "in_game" : "lobby",
             wave = GameManager.CurrentWave,
             taskProgress = TaskManager.Instance != null ? TaskManager.Instance.taskProgress : 0f,
             totalTasks = TaskManager.Instance != null ? TaskManager.Instance.TotalTasks : 0,
@@ -1444,6 +1558,7 @@ public sealed class FirebaseMatchState
 {
     public bool gameStarted;
     public string phase;
+    public string status;
     public int wave;
     public float taskProgress;
     public int totalTasks;
