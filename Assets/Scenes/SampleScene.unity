@@ -350,11 +350,14 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::GameFlowManager
   usePlaceholderUi: 1
+  useTeamAEntryUi: 1
   disableGameplayUntilMatchStart: 1
   debugLogs: 1
   defaultRoomCode: ROOM123
   defaultPlayerId: player_1
   defaultPlayerName: Player 1
+  mainMenuPrefab: {fileID: 344505512037045837, guid: d7b6516185eb02d4bba7cfe08ad28ad9, type: 3}
+  createJoinRoomPrefab: {fileID: 2019587859865483717, guid: 044b4d7b85ebba64494677cedce193b1, type: 3}
   mainMenuPanel: {fileID: 0}
   createJoinPanel: {fileID: 0}
   lobbyPanel: {fileID: 0}
@@ -364,6 +367,15 @@ MonoBehaviour:
   gameManagerToPause: {fileID: 93174135}
   localPlayerMovement: {fileID: 565244770}
   firebaseClient: {fileID: 1031503788}
+  lobbyRoomCodeText: {fileID: 0}
+  lobbyStatusText: {fileID: 0}
+  lobbyPlayerListText: {fileID: 0}
+  readyButton: {fileID: 0}
+  startMatchButton: {fileID: 0}
+  leaveButton: {fileID: 0}
+  readyButtonLabel: {fileID: 0}
+  startMatchButtonLabel: {fileID: 0}
+  leaveButtonLabel: {fileID: 0}
 --- !u!4 &20625612
 Transform:
   m_ObjectHideFlags: 0
@@ -957,7 +969,7 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 93174134}
-  m_Enabled: 1
+  m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 531e7a7722b635b4aa059cf26d81f73d, type: 3}
   m_Name: 
@@ -2363,7 +2375,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!114 &245209376
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -5394,7 +5406,7 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 565244767}
-  m_Enabled: 1
+  m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 58c1a9f321ff1334b9688ca0de2691ee, type: 3}
   m_Name: 

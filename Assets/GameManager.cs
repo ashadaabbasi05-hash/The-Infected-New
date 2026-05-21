@@ -86,8 +86,21 @@ public sealed class GameManager : MonoBehaviour
         }
     }
 
+    bool gameFlowPauseLogged;
+
     void Update()
     {
+        // Pause phase loop before match starts to prevent boot-time leak
+        if (GameFlowManager.Instance != null && !GameFlowManager.Instance.IsMatchActive)
+        {
+            if (!gameFlowPauseLogged)
+            {
+                gameFlowPauseLogged = true;
+                Debug.Log("[GAME FLOW] GameManager phase loop paused until match start.");
+            }
+            return;
+        }
+
         phaseTimer += Time.deltaTime;
 
         switch (currentPhase)

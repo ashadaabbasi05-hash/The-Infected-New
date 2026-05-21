@@ -119,6 +119,14 @@ public sealed class MeetingController : MonoBehaviour
         EnsurePublicAntidoteStatusUi();
         LogLocalPlayerStrict("Start");
 
+        // BLOCK auto-start of meeting/voting systems until match is active
+        if (!IsGameplayFlowAllowed())
+        {
+            HideAllMeetingVotingAntidoteUi("blocked during app flow");
+            Debug.Log("[MEETING DEBUG] Startup meeting/voting blocked until match start.", this);
+            return;
+        }
+
         Debug.Log("[MEETING DEBUG] meetingPanel ref=" + (meetingPanel != null ? meetingPanel.name : "NULL"), this);
         Debug.Log("[MEETING DEBUG] votingPanel ref=" + (votingPanel != null ? votingPanel.name : "NULL"), this);
 
@@ -241,6 +249,12 @@ public sealed class MeetingController : MonoBehaviour
             return;
         }
 
+        if (!IsGameplayFlowAllowed())
+        {
+            Debug.Log("[MEETING DEBUG] StartMeeting blocked because match is not active.", this);
+            return;
+        }
+
         if (meetingActive && flowState == MeetingFlowState.Discussion)
         {
             return;
@@ -289,6 +303,12 @@ public sealed class MeetingController : MonoBehaviour
         if (IsFinalHuntActive())
         {
             HideMeetingAndVotingUi();
+            return;
+        }
+
+        if (!IsGameplayFlowAllowed())
+        {
+            Debug.Log("[MEETING DEBUG] StartVoting blocked because match is not active.", this);
             return;
         }
 
@@ -1137,6 +1157,18 @@ public sealed class MeetingController : MonoBehaviour
         }
 
         Debug.Log($"[VOTE DEBUG] Local player strict ({context}) = {GetPlayerDisplayName(local)} playerId={local.playerId}", this);
+    }
+
+    /// <summary>
+    /// Returns true if gameplay phases (meeting/voting) are allowed to execute.
+    /// Blocks boot-time leak before GameFlowManager enters InGame.
+    /// </summary>
+    bool IsGameplayFlowAllowed()
+    {
+        if (GameFlowManager.Instance == null)
+            return true; // preserve old demo behavior if flow manager is absent
+
+        return GameFlowManager.Instance.IsMatchActive;
     }
 
     int CountEligibleVoters()
