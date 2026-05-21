@@ -18,6 +18,7 @@ public sealed class FirebaseRemotePlayerManager : MonoBehaviour
     [SerializeField] public bool debugLogs = true;
 
     readonly Dictionary<string, GameObject> spawnedRemotes = new Dictionary<string, GameObject>(StringComparer.Ordinal);
+    readonly HashSet<string> seenLobbyPlayerIds = new HashSet<string>(StringComparer.Ordinal);
 
     // Simulated remote data for testing without Firebase
     Vector3 simulatedRemotePosition;
@@ -37,6 +38,18 @@ public sealed class FirebaseRemotePlayerManager : MonoBehaviour
     void Start()
     {
         ResolveReferences();
+        SubscribeFirebaseEvents();
+    }
+
+    void OnEnable()
+    {
+        ResolveReferences();
+        SubscribeFirebaseEvents();
+    }
+
+    void OnDisable()
+    {
+        UnsubscribeFirebaseEvents();
     }
 
     void Update()
@@ -62,6 +75,111 @@ public sealed class FirebaseRemotePlayerManager : MonoBehaviour
         if (remotePlayersParent == null)
         {
             remotePlayersParent = transform;
+        }
+    }
+
+    void SubscribeFirebaseEvents()
+    {
+        if (firebaseClient == null)
+        {
+            return;
+        }
+
+        firebaseClient.OnLobbyPlayersChanged -= HandleLobbyPlayersChanged;
+        firebaseClient.OnRoomLeft -= HandleRoomLeft;
+        firebaseClient.OnLobbyPlayersChanged += HandleLobbyPlayersChanged;
+        firebaseClient.OnRoomLeft += HandleRoomLeft;
+    }
+
+    void UnsubscribeFirebaseEvents()
+    {
+        if (firebaseClient == null)
+        {
+            return;
+        }
+
+        firebaseClient.OnLobbyPlayersChanged -= HandleLobbyPlayersChanged;
+        firebaseClient.OnRoomLeft -= HandleRoomLeft;
+    }
+
+    void HandleRoomLeft(string roomCode)
+    {
+        ClearAllRemotes();
+        seenLobbyPlayerIds.Clear();
+        if (debugLogs)
+        {
+            Debug.Log($"[REMOTE] Room left, cleared remote players for {roomCode}");
+        }
+    }
+
+    void HandleLobbyPlayersChanged(List<LobbyPlayerData> players)
+    {
+        if (players == null)
+        {
+            return;
+        }
+
+        ResolveReferences();
+
+        string localPlayerId = firebaseClient != null ? firebaseClient.LocalPlayerId : string.Empty;
+        seenLobbyPlayerIds.Clear();
+
+        for (int i = 0; i < players.Count; i++)
+        {
+            LobbyPlayerData player = players[i];
+            if (player == null || string.IsNullOrWhiteSpace(player.playerId))
+            {
+                continue;
+            }
+
+            seenLobbyPlayerIds.Add(player.playerId);
+
+            if (!string.IsNullOrWhiteSpace(localPlayerId) && string.Equals(player.playerId, localPlayerId, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            Vector3 worldPosition = new Vector3(player.x, player.y, player.z);
+            GameObject remote = GetOrCreateRemotePlayer(player.playerId, worldPosition, player.displayName);
+
+            if (remote != null)
+            {
+                RemotePlayerView view = remote.GetComponent<RemotePlayerView>();
+                if (view != null)
+                {
+                    view.SetTargetPosition(worldPosition);
+                }
+
+                PlayerOwnership ownership = remote.GetComponent<PlayerOwnership>();
+                if (ownership != null)
+                {
+                    ownership.Configure(player.playerId, false, !player.isBot, player.isBot);
+                }
+
+                if (player.isAlive && !remote.activeSelf)
+                {
+                    remote.SetActive(true);
+                }
+            }
+        }
+
+        List<string> staleIds = new List<string>();
+        foreach (KeyValuePair<string, GameObject> entry in spawnedRemotes)
+        {
+            if (!seenLobbyPlayerIds.Contains(entry.Key))
+            {
+                staleIds.Add(entry.Key);
+            }
+        }
+
+        for (int i = 0; i < staleIds.Count; i++)
+        {
+            RemoveRemotePlayer(staleIds[i]);
+        }
+
+        if (debugLogs)
+        {
+            Debug.Log($"[REMOTE] Applied lobby snapshot count={players.Count}");
         }
     }
 
@@ -288,6 +406,7 @@ public sealed class FirebaseRemotePlayerManager : MonoBehaviour
 
     void OnDestroy()
     {
+        UnsubscribeFirebaseEvents();
         if (Instance == this)
             Instance = null;
     }

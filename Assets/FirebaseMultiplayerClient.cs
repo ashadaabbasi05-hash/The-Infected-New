@@ -24,6 +24,7 @@ public sealed class FirebaseMultiplayerClient : MonoBehaviour
     [SerializeField] bool autoJoinOnStart = false;
     [SerializeField] string roomCode = "ROOM123";
     [SerializeField] string localPlayerId = "player_1";
+    [SerializeField] string displayName = "Player 1";
     [SerializeField] string databaseUrl = "https://the-infected-hackathon-default-rtdb.asia-southeast1.firebasedatabase.app";
     [SerializeField, Min(0.01f)] float positionSyncInterval = 0.15f;
     [SerializeField] Transform localPlayerTransform;
@@ -34,6 +35,7 @@ public sealed class FirebaseMultiplayerClient : MonoBehaviour
     public bool IsHost { get; private set; }
     public string CurrentRoomCode => roomCode;
     public string LocalPlayerId => localPlayerId;
+    public string DisplayName => displayName;
     public readonly Dictionary<string, RemotePlayerView> remotePlayers = new Dictionary<string, RemotePlayerView>();
 
     public bool IsOnline
@@ -249,6 +251,7 @@ public sealed class FirebaseMultiplayerClient : MonoBehaviour
     {
         roomCode = NormalizeRoomCode(code);
         localPlayerId = NormalizeFirebasePlayerId(localPlayerId);
+        displayName = NormalizeDisplayName(displayName, localPlayerId);
         localReady = false;
         hasAnnouncedMatchStartFromFirebase = false;
         matchHasStartedLocally = false;
@@ -300,6 +303,7 @@ public sealed class FirebaseMultiplayerClient : MonoBehaviour
     {
         roomCode = NormalizeRoomCode(code);
         localPlayerId = NormalizeFirebasePlayerId(playerId);
+        displayName = NormalizeDisplayName(displayName, localPlayerId);
         localReady = false;
         hasAnnouncedMatchStartFromFirebase = false;
         matchHasStartedLocally = false;
@@ -844,6 +848,9 @@ public sealed class FirebaseMultiplayerClient : MonoBehaviour
         player.isReady = GetSnapshotBool(snapshot, "isReady", false);
         player.isAlive = GetSnapshotBool(snapshot, "isAlive", true);
         player.isBot = GetSnapshotBool(snapshot, "isBot", false);
+        player.x = GetSnapshotFloat(snapshot, "x", 0f);
+        player.y = GetSnapshotFloat(snapshot, "y", 0f);
+        player.z = GetSnapshotFloat(snapshot, "z", 0f);
         player.lastSeenAt = GetSnapshotLong(snapshot, "lastSeenAt", 0L);
         return player;
     }
@@ -906,6 +913,35 @@ public sealed class FirebaseMultiplayerClient : MonoBehaviour
             if (long.TryParse(child.Value.ToString(), out long parsedLong))
             {
                 return parsedLong;
+            }
+        }
+
+        return fallback;
+    }
+
+    static float GetSnapshotFloat(DataSnapshot snapshot, string childName, float fallback)
+    {
+        if (snapshot == null)
+        {
+            return fallback;
+        }
+
+        DataSnapshot child = snapshot.Child(childName);
+        if (child != null && child.Value != null)
+        {
+            if (child.Value is float floatValue)
+            {
+                return floatValue;
+            }
+
+            if (child.Value is double doubleValue)
+            {
+                return (float)doubleValue;
+            }
+
+            if (float.TryParse(child.Value.ToString(), out float parsedFloat))
+            {
+                return parsedFloat;
             }
         }
 
@@ -979,6 +1015,10 @@ public sealed class FirebaseMultiplayerClient : MonoBehaviour
         }
 
         string displayName = GetDisplayName(localPlayerIdentity);
+        if (!string.IsNullOrWhiteSpace(this.displayName))
+        {
+            displayName = this.displayName;
+        }
         object lastSeenAtValue = GetTimestampUtc();
 
         WriteLobbyPlayerField("playerId", playerKey);
@@ -987,6 +1027,9 @@ public sealed class FirebaseMultiplayerClient : MonoBehaviour
         WriteLobbyPlayerField("isReady", localReady);
         WriteLobbyPlayerField("isAlive", localPlayerIdentity == null || localPlayerIdentity.isAlive);
         WriteLobbyPlayerField("isBot", localPlayerIdentity != null && localPlayerIdentity.isAIControlled);
+        WriteLobbyPlayerField("x", localPlayerTransform != null ? localPlayerTransform.position.x : 0f);
+        WriteLobbyPlayerField("y", localPlayerTransform != null ? localPlayerTransform.position.y : 0f);
+        WriteLobbyPlayerField("z", localPlayerTransform != null ? localPlayerTransform.position.z : 0f);
         WriteLobbyPlayerField("lastSeenAt", lastSeenAtValue);
     }
 
@@ -1015,11 +1058,14 @@ public sealed class FirebaseMultiplayerClient : MonoBehaviour
             new LobbyPlayerData
             {
                 playerId = NormalizeFirebasePlayerId(localPlayerId),
-                displayName = GetDisplayName(localPlayerIdentity),
+                displayName = GetLocalDisplayName(),
                 isHost = IsHost,
                 isReady = localReady,
                 isAlive = localPlayerIdentity == null || localPlayerIdentity.isAlive,
                 isBot = localPlayerIdentity != null && localPlayerIdentity.isAIControlled,
+                x = localPlayerTransform != null ? localPlayerTransform.position.x : 0f,
+                y = localPlayerTransform != null ? localPlayerTransform.position.y : 0f,
+                z = localPlayerTransform != null ? localPlayerTransform.position.z : 0f,
                 lastSeenAt = GetTimestampUtc()
             }
         };
@@ -1059,7 +1105,7 @@ public sealed class FirebaseMultiplayerClient : MonoBehaviour
         playerState = new FirebasePlayerState
         {
             playerId = localPlayerId,
-            displayName = identity != null && !string.IsNullOrWhiteSpace(identity.playerName) ? identity.playerName : localPlayerId,
+            displayName = GetLocalDisplayName(),
             x = worldPosition.x,
             y = worldPosition.y,
             alive = identity == null || identity.isAlive,
@@ -1316,6 +1362,46 @@ public sealed class FirebaseMultiplayerClient : MonoBehaviour
         }
 
         return trimmed;
+    }
+
+    static string NormalizeDisplayName(string name, string fallbackPlayerId)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return string.IsNullOrWhiteSpace(fallbackPlayerId) ? "Player 1" : fallbackPlayerId;
+        }
+
+        return name.Trim();
+    }
+
+    string GetLocalDisplayName()
+    {
+        if (!string.IsNullOrWhiteSpace(displayName))
+        {
+            return displayName;
+        }
+
+        if (localPlayerIdentity != null && !string.IsNullOrWhiteSpace(localPlayerIdentity.playerName))
+        {
+            return localPlayerIdentity.playerName;
+        }
+
+        return localPlayerId;
+    }
+
+    public void SetLocalPlayerId(string id)
+    {
+        localPlayerId = NormalizeFirebasePlayerId(id);
+    }
+
+    public void SetDisplayName(string name)
+    {
+        displayName = NormalizeDisplayName(name, localPlayerId);
+    }
+
+    public void SetRoomCode(string code)
+    {
+        roomCode = NormalizeRoomCode(code);
     }
 
     static string GetDisplayName(PlayerIdentity player)

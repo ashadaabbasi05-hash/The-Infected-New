@@ -110,6 +110,16 @@ public class CreateJoinRoomUI : MonoBehaviour
         }
     }
 
+    public void SetRoomCode(string newRoomCode)
+    {
+        if (roomCodeInput == null)
+        {
+            return;
+        }
+
+        roomCodeInput.text = string.IsNullOrWhiteSpace(newRoomCode) ? string.Empty : newRoomCode.Trim().ToUpperInvariant();
+    }
+
     public void SetError(string message)
     {
         if (errorText == null)

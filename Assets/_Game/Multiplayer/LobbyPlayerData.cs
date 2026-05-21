@@ -9,5 +9,8 @@ public class LobbyPlayerData
     public bool isReady;
     public bool isAlive;
     public bool isBot;
+    public float x;
+    public float y;
+    public float z;
     public long lastSeenAt;
 }

@@ -48,6 +48,7 @@ public sealed class GameFlowManager : MonoBehaviour
     [SerializeField] public MonoBehaviour gameManagerToPause;
     [SerializeField] public PlayerMovement localPlayerMovement;
     [SerializeField] public FirebaseMultiplayerClient firebaseClient;
+    [SerializeField] public MultiplayerClientConfig clientConfig;
 
     [Header("Lobby UI")]
     [SerializeField] TMP_Text lobbyRoomCodeText;
@@ -106,6 +107,7 @@ public sealed class GameFlowManager : MonoBehaviour
         Instance = this;
 
         RefreshSceneReferences();
+        ApplyClientConfigIfAvailable();
 
         if (usePlaceholderUi && !ShouldUseTeamAEntry())
         {
@@ -119,6 +121,7 @@ public sealed class GameFlowManager : MonoBehaviour
     void OnEnable()
     {
         RefreshSceneReferences();
+        ApplyClientConfigIfAvailable();
         SubscribeFirebaseEvents();
     }
 
@@ -174,6 +177,11 @@ public sealed class GameFlowManager : MonoBehaviour
             firebaseClient = FirebaseMultiplayerClient.TryGetActiveClient();
         }
 
+        if (clientConfig == null)
+        {
+            clientConfig = FindAnyObjectByType<MultiplayerClientConfig>();
+        }
+
         if (localPlayerMovement == null)
         {
             PlayerIdentity[] players = PlayerIdentity.GetAllPlayers();
@@ -207,6 +215,48 @@ public sealed class GameFlowManager : MonoBehaviour
                 demoStartOverlayRoot = overlay.gameObject;
             }
         }
+    }
+
+    void ApplyClientConfigIfAvailable()
+    {
+        if (clientConfig == null)
+        {
+            return;
+        }
+
+        defaultPlayerId = string.IsNullOrWhiteSpace(clientConfig.LocalPlayerId) ? defaultPlayerId : clientConfig.LocalPlayerId;
+        defaultPlayerName = string.IsNullOrWhiteSpace(clientConfig.DisplayName) ? defaultPlayerName : clientConfig.DisplayName;
+        defaultRoomCode = string.IsNullOrWhiteSpace(clientConfig.RoomCode) ? defaultRoomCode : clientConfig.RoomCode.ToUpperInvariant();
+
+        if (firebaseClient != null)
+        {
+            firebaseClient.SetLocalPlayerId(defaultPlayerId);
+            firebaseClient.SetDisplayName(defaultPlayerName);
+            firebaseClient.SetRoomCode(defaultRoomCode);
+        }
+
+        if (createJoinRoomInstance != null)
+        {
+            createJoinRoomInstance.SetPlayerName(defaultPlayerName);
+            createJoinRoomInstance.SetRoomCode(defaultRoomCode);
+        }
+    }
+
+    void PushCurrentIdentityToFirebase()
+    {
+        if (firebaseClient == null)
+        {
+            firebaseClient = FirebaseMultiplayerClient.TryGetActiveClient();
+        }
+
+        if (firebaseClient == null)
+        {
+            return;
+        }
+
+        firebaseClient.SetLocalPlayerId(defaultPlayerId);
+        firebaseClient.SetDisplayName(defaultPlayerName);
+        firebaseClient.SetRoomCode(defaultRoomCode);
     }
 
     void SubscribeFirebaseEvents()
@@ -333,6 +383,7 @@ public sealed class GameFlowManager : MonoBehaviour
     void HandleTeamACreateRoom(string playerName)
     {
         defaultPlayerName = playerName;
+        PushCurrentIdentityToFirebase();
         if (createJoinRoomInstance != null) createJoinRoomInstance.SetLoading(true);
         if (createJoinRoomInstance != null) createJoinRoomInstance.SetError("");
         ShowLobby();
@@ -343,6 +394,7 @@ public sealed class GameFlowManager : MonoBehaviour
     {
         defaultPlayerName = playerName;
         defaultRoomCode = string.IsNullOrWhiteSpace(roomCode) ? "ROOM123" : roomCode.Trim().ToUpperInvariant();
+        PushCurrentIdentityToFirebase();
         if (createJoinRoomInstance != null) createJoinRoomInstance.SetLoading(true);
         if (createJoinRoomInstance != null) createJoinRoomInstance.SetError("");
         ShowLobby();
@@ -751,8 +803,9 @@ public sealed class GameFlowManager : MonoBehaviour
             EnsureTeamACreateJoin();
             if (createJoinRoomInstance != null)
             {
-                createJoinRoomInstance.SetPlayerName(GetOrCreateDisplayName());
                 createJoinRoomInstance.ClearInputs();
+                createJoinRoomInstance.SetPlayerName(string.IsNullOrWhiteSpace(defaultPlayerName) ? GetOrCreateDisplayName() : defaultPlayerName);
+                createJoinRoomInstance.SetRoomCode(defaultRoomCode);
                 createJoinRoomInstance.gameObject.SetActive(true);
                 ConfigureTeamACanvas(createJoinRoomInstance.gameObject);
             }
@@ -775,6 +828,7 @@ public sealed class GameFlowManager : MonoBehaviour
     {
         RefreshSceneReferences();
         SubscribeFirebaseEvents();
+        PushCurrentIdentityToFirebase();
         localReady = false;
         UpdateReadyButtonLabel();
         ShowLobby("Creating room...");
@@ -791,6 +845,7 @@ public sealed class GameFlowManager : MonoBehaviour
     {
         RefreshSceneReferences();
         SubscribeFirebaseEvents();
+        PushCurrentIdentityToFirebase();
         localReady = false;
         UpdateReadyButtonLabel();
         ShowLobby("Joining room...");

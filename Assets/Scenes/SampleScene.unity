@@ -330,6 +330,7 @@ GameObject:
   m_Component:
   - component: {fileID: 20625612}
   - component: {fileID: 20625611}
+  - component: {fileID: 20625613}
   m_Layer: 0
   m_Name: GameFlowSystem
   m_TagString: Untagged
@@ -367,6 +368,7 @@ MonoBehaviour:
   gameManagerToPause: {fileID: 93174135}
   localPlayerMovement: {fileID: 565244770}
   firebaseClient: {fileID: 1031503788}
+  clientConfig: {fileID: 0}
   lobbyRoomCodeText: {fileID: 0}
   lobbyStatusText: {fileID: 0}
   lobbyPlayerListText: {fileID: 0}
@@ -391,6 +393,23 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &20625613
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 20625610}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 77360661b0833a842b907647db93dcc7, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::MultiplayerClientConfig
+  localPlayerId: player_1
+  displayName: Player 1
+  roomCode: ROOM123
+  isHostClient: 1
+  debugLogs: 1
 --- !u!1 &23834454
 GameObject:
   m_ObjectHideFlags: 0
@@ -9869,6 +9888,7 @@ MonoBehaviour:
   autoJoinOnStart: 0
   roomCode: ROOM123
   localPlayerId: player_1
+  displayName: Player 1
   databaseUrl: https://the-infected-hackathon-default-rtdb.asia-southeast1.firebasedatabase.app
   positionSyncInterval: 0.15
   localPlayerTransform: {fileID: 565244773}
