@@ -200,6 +200,22 @@ public sealed class FirebaseMultiplayerClient : MonoBehaviour
             return;
         }
 
+        // Only publish position when match is active or in lobby
+        bool shouldPublish = false;
+        if (GameFlowManager.Instance != null)
+        {
+            shouldPublish = GameFlowManager.Instance.IsMatchActive || GameFlowManager.Instance.CurrentState == AppFlowState.Lobby;
+        }
+        else
+        {
+            shouldPublish = true; // fallback if GameFlowManager not present
+        }
+
+        if (!shouldPublish)
+        {
+            return;
+        }
+
         if (Time.unscaledTime < nextPositionSyncTime)
         {
             return;
