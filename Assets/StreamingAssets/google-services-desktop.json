@@ -1,0 +1,30 @@
+{
+  "project_info": {
+    "project_number": "240704129360",
+    "firebase_url": "https://the-infected-hackathon-default-rtdb.asia-southeast1.firebasedatabase.app",
+    "project_id": "the-infected-hackathon",
+    "storage_bucket": "the-infected-hackathon.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:240704129360:android:6ee36ac429cf6e073c0455",
+        "android_client_info": {
+          "package_name": "com.theinfected.game"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCeucGCoyNFYOl69InHioGBH6VFi-zADbA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -201,6 +201,12 @@ public sealed class TaskManager : MonoBehaviour
 
         RefreshProgressAndEvents();
 
+        FirebaseMultiplayerClient multiplayerClient = FirebaseMultiplayerClient.TryGetActiveClient();
+        if (multiplayerClient != null && multiplayerClient.IsOnline)
+        {
+            multiplayerClient.PublishTaskState();
+        }
+
         if (!hasTracedExitScanUnlocked && IsExitScanUnlocked)
         {
             hasTracedExitScanUnlocked = true;

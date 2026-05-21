@@ -20,6 +20,7 @@ public class TeamAApiClient : MonoBehaviour
     [SerializeField] private float requestTimeoutSeconds = 8f;
     [SerializeField] private bool enableApiCalls = false;
     [SerializeField] private bool debugLogs = true;
+    [SerializeField] private bool addNgrokSkipBrowserWarningHeader = true;
     [SerializeField] private bool traceToAgentPanel = true;
 
     // Expose read-only flag for external callers to check if API calls are enabled
@@ -180,10 +181,14 @@ public class TeamAApiClient : MonoBehaviour
 
         if (debugLogs) Debug.Log("[TEAM A API] GET " + path);
 
-        using (UnityWebRequest request = UnityWebRequest.Get(url))
+            using (UnityWebRequest request = UnityWebRequest.Get(url))
         {
             request.timeout = Mathf.CeilToInt(requestTimeoutSeconds);
             request.SetRequestHeader("Accept", "application/json");
+                if (addNgrokSkipBrowserWarningHeader)
+                {
+                    request.SetRequestHeader("ngrok-skip-browser-warning", "true");
+                }
 
             yield return request.SendWebRequest();
 
@@ -221,12 +226,16 @@ public class TeamAApiClient : MonoBehaviour
 
         if (debugLogs) Debug.Log("[TEAM A API] POST " + path);
 
-        using (UnityWebRequest webRequest = new UnityWebRequest(url, "POST"))
+            using (UnityWebRequest webRequest = new UnityWebRequest(url, "POST"))
         {
             webRequest.uploadHandler = new UploadHandlerRaw(bodyRaw);
             webRequest.downloadHandler = new DownloadHandlerBuffer();
             webRequest.SetRequestHeader("Content-Type", "application/json");
             webRequest.SetRequestHeader("Accept", "application/json");
+            if (addNgrokSkipBrowserWarningHeader)
+            {
+                webRequest.SetRequestHeader("ngrok-skip-browser-warning", "true");
+            }
             webRequest.timeout = Mathf.CeilToInt(requestTimeoutSeconds);
 
             yield return webRequest.SendWebRequest();

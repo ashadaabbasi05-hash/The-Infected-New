@@ -71,6 +71,13 @@ public sealed class GameEndManager : MonoBehaviour
         }
 
         gameEnded = true;
+
+        FirebaseMultiplayerClient multiplayerClient = FirebaseMultiplayerClient.TryGetActiveClient();
+        if (multiplayerClient != null && multiplayerClient.IsOnline)
+        {
+            multiplayerClient.PublishWinner("humans");
+        }
+
         ShowPanel(winPanel);
         HidePanel(gameOverPanel);
 
@@ -154,6 +161,16 @@ public sealed class GameEndManager : MonoBehaviour
         }
 
         gameEnded = true;
+
+        if (!string.IsNullOrWhiteSpace(reason) && reason.IndexOf("No alive human", System.StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            FirebaseMultiplayerClient multiplayerClient = FirebaseMultiplayerClient.TryGetActiveClient();
+            if (multiplayerClient != null && multiplayerClient.IsOnline)
+            {
+                multiplayerClient.PublishWinner("infected");
+            }
+        }
+
         ShowPanel(gameOverPanel);
         HidePanel(winPanel);
 

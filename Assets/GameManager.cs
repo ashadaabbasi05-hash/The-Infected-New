@@ -262,6 +262,12 @@ public sealed class GameManager : MonoBehaviour
     void RaiseStateChanged()
     {
         OnStateChanged?.Invoke(GetSnapshot());
+
+        FirebaseMultiplayerClient multiplayerClient = FirebaseMultiplayerClient.TryGetActiveClient();
+        if (multiplayerClient != null && multiplayerClient.IsOnline)
+        {
+            multiplayerClient.PublishMatchState();
+        }
     }
 
     void OnDestroy()

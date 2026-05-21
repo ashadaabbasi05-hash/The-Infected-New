@@ -141,6 +141,12 @@ public sealed class FinalHuntManager : MonoBehaviour
         }
 
         IsFinalHuntActive = true;
+        FirebaseMultiplayerClient multiplayerClient = FirebaseMultiplayerClient.TryGetActiveClient();
+        if (multiplayerClient != null && multiplayerClient.IsOnline)
+        {
+            multiplayerClient.PublishFinalHuntState(true);
+        }
+
         AgentTracePanel.Trace("FINAL HUNT", "Final Hunt started: 3 infected vs 1 human.");
         Debug.Log("[FINAL HUNT] STARTED", this);
 
@@ -200,6 +206,12 @@ public sealed class FinalHuntManager : MonoBehaviour
 
         IsFinalHuntActive = false;
         trackedLastHuman = null;
+
+        FirebaseMultiplayerClient multiplayerClient = FirebaseMultiplayerClient.TryGetActiveClient();
+        if (multiplayerClient != null && multiplayerClient.IsOnline)
+        {
+            multiplayerClient.PublishFinalHuntState(false);
+        }
 
         HideFinalHuntWarningImmediate();
 
