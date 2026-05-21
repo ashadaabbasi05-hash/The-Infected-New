@@ -352,11 +352,12 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::GameFlowManager
   usePlaceholderUi: 1
   useTeamAEntryUi: 1
+  showDevClientSwitcher: 0
   disableGameplayUntilMatchStart: 1
   debugLogs: 1
   defaultRoomCode: ROOM123
-  defaultPlayerId: player_1
-  defaultPlayerName: Player 1
+  defaultPlayerId: player_2
+  defaultPlayerName: Player 2
   mainMenuPrefab: {fileID: 344505512037045837, guid: d7b6516185eb02d4bba7cfe08ad28ad9, type: 3}
   createJoinRoomPrefab: {fileID: 2019587859865483717, guid: 044b4d7b85ebba64494677cedce193b1, type: 3}
   mainMenuPanel: {fileID: 0}
@@ -378,6 +379,8 @@ MonoBehaviour:
   readyButtonLabel: {fileID: 0}
   startMatchButtonLabel: {fileID: 0}
   leaveButtonLabel: {fileID: 0}
+  devClientSwitcherRoot: {fileID: 0}
+  devClientSwitcherStatusText: {fileID: 0}
 --- !u!4 &20625612
 Transform:
   m_ObjectHideFlags: 0
@@ -405,10 +408,10 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 77360661b0833a842b907647db93dcc7, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::MultiplayerClientConfig
-  localPlayerId: player_1
-  displayName: Player 1
+  localPlayerId: player_2
+  displayName: Player 2
   roomCode: ROOM123
-  isHostClient: 1
+  isHostClient: 0
   debugLogs: 1
 --- !u!1 &23834454
 GameObject:
@@ -9887,8 +9890,8 @@ MonoBehaviour:
   debugLogs: 1
   autoJoinOnStart: 0
   roomCode: ROOM123
-  localPlayerId: player_1
-  displayName: Player 1
+  localPlayerId: player_2
+  displayName: Player 2
   databaseUrl: https://the-infected-hackathon-default-rtdb.asia-southeast1.firebasedatabase.app
   positionSyncInterval: 0.15
   localPlayerTransform: {fileID: 565244773}

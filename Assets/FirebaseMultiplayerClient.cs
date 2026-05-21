@@ -18,6 +18,7 @@ public sealed class FirebaseMultiplayerClient : MonoBehaviour
     public event Action<string> OnRoomJoined;
     public event Action<string> OnRoomLeft;
     public event Action<string> OnMatchStartedFromFirebase;
+    public event Action<string> OnRoomError;
 
     [SerializeField] bool enableFirebase = false;
     [SerializeField] bool debugLogs = true;
@@ -54,8 +55,10 @@ public sealed class FirebaseMultiplayerClient : MonoBehaviour
     // Pending room request state (queued if Create/Join called before Firebase initialized)
     bool pendingCreateRoom;
     bool pendingJoinRoom;
+    bool pendingAutoJoinRoom;
     string pendingRoomCode;
     string pendingPlayerId;
+    string pendingRequestedDisplayName;
     bool localReady;
     bool matchStartEventRaised;
     bool matchHasStartedLocally;
@@ -77,6 +80,7 @@ public sealed class FirebaseMultiplayerClient : MonoBehaviour
     bool initialized;
     bool joined;
     float nextPositionSyncTime;
+    float nextPositionLogTime;
     bool announcedLocalFallback;
     bool cachedFinalHuntActive;
     string cachedWinner = string.Empty;
@@ -251,8 +255,9 @@ public sealed class FirebaseMultiplayerClient : MonoBehaviour
     public void CreateRoom(string code)
     {
         roomCode = NormalizeRoomCode(code);
-        localPlayerId = NormalizeFirebasePlayerId(localPlayerId);
-        displayName = NormalizeDisplayName(displayName, localPlayerId);
+        localPlayerId = "player_1";
+        displayName = "Player 1";
+        IsHost = true;
         localReady = false;
         matchStartEventRaised = false;
         matchHasStartedLocally = false;
@@ -283,31 +288,39 @@ public sealed class FirebaseMultiplayerClient : MonoBehaviour
         }
 
 #if FIREBASE_ENABLED
-        IsHost = true;
-        joined = true;
-        cachedWinner = string.Empty;
-        cachedFinalHuntActive = false;
-
         SetupFirebaseRoomReferences();
-        WriteRoomMeta(true);
-        WriteLobbyState();
-        AttachFirebaseListeners();
-        PublishLocalPlayerState();
-    EmitLocalLobbyPlayersChanged();
-        OnRoomJoined?.Invoke(roomCode);
-        Debug.Log($"[FIREBASE] Joined room {roomCode} as {localPlayerId}.", this);
-        Debug.Log($"[FIREBASE] Room created {roomCode} host={localPlayerId}", this);
+
+        if (roomRootRef == null)
+        {
+            Debug.LogWarning($"[FIREBASE] Room create failed: unable to resolve room root for {roomCode}.", this);
+            return;
+        }
+
+        roomRootRef.RemoveValueAsync().ContinueWithOnMainThread(task =>
+        {
+            if (task.IsFaulted || task.IsCanceled)
+            {
+                Debug.LogWarning($"[FIREBASE] Room reset failed for {roomCode}: {(task.Exception != null ? task.Exception.ToString() : "canceled")}", this);
+            }
+
+            FinalizeCreateRoom();
+        });
 #endif
     }
 
     public void JoinRoom(string code, string playerId)
     {
+        BeginJoinRoomInternal(code, NormalizeFirebasePlayerId(playerId), NormalizeDisplayName(displayName, playerId), false);
+    }
+
+    public void JoinRoomAuto(string code, string requestedDisplayName = null)
+    {
         roomCode = NormalizeRoomCode(code);
-        localPlayerId = NormalizeFirebasePlayerId(playerId);
-        displayName = NormalizeDisplayName(displayName, localPlayerId);
         localReady = false;
         matchStartEventRaised = false;
         matchHasStartedLocally = false;
+        cachedWinner = string.Empty;
+        cachedFinalHuntActive = false;
 
         CacheLocalReferences();
 
@@ -317,14 +330,14 @@ public sealed class FirebaseMultiplayerClient : MonoBehaviour
             return;
         }
 
-        // If Firebase hasn't finished initializing, queue the join request.
         if (!initialized)
         {
-            pendingJoinRoom = true;
+            pendingAutoJoinRoom = true;
+            pendingJoinRoom = false;
             pendingCreateRoom = false;
             pendingRoomCode = roomCode;
-            pendingPlayerId = NormalizeFirebasePlayerId(playerId);
-            Debug.Log($"[FIREBASE] JoinRoom queued until Firebase ready. room={pendingRoomCode} player={pendingPlayerId}", this);
+            pendingRequestedDisplayName = requestedDisplayName;
+            Debug.Log($"[FIREBASE] JoinRoomAuto queued until Firebase ready. room={pendingRoomCode}", this);
             return;
         }
 
@@ -335,30 +348,36 @@ public sealed class FirebaseMultiplayerClient : MonoBehaviour
         }
 
 #if FIREBASE_ENABLED
-        if (rootRef == null)
-        {
-            return;
-        }
-
         SetupFirebaseRoomReferences();
 
-        if (stateRef == null)
+        if (playersRef == null)
         {
-            FinalizeJoinRoom(false);
+            ReportRoomError($"[FIREBASE] Join failed: unable to read lobby for {roomCode}.");
             return;
         }
 
-        stateRef.GetValueAsync().ContinueWithOnMainThread(task =>
+        playersRef.GetValueAsync().ContinueWithOnMainThread(task =>
         {
-            bool roomAlreadyStarted = false;
-
-            if (!task.IsFaulted && !task.IsCanceled && task.Result != null && task.Result.Exists)
+            if (task.IsFaulted || task.IsCanceled || task.Result == null)
             {
-                FirebaseMatchState existingState = DeserializeMatchState(task.Result);
-                roomAlreadyStarted = IsMatchStartedState(existingState);
+                ReportRoomError($"[FIREBASE] Join failed: unable to read lobby for {roomCode}.");
+                return;
             }
 
-            FinalizeJoinRoom(roomAlreadyStarted);
+            string assignedSlot = ChooseAutoJoinSlot(task.Result);
+            if (string.IsNullOrWhiteSpace(assignedSlot))
+            {
+                ReportRoomError($"[FIREBASE] Room full. Cannot join {roomCode}.");
+                return;
+            }
+
+            localPlayerId = assignedSlot;
+            displayName = ResolveAutoJoinDisplayName(assignedSlot, requestedDisplayName);
+            IsHost = false;
+
+            Debug.Log($"[FIREBASE] Auto-assigned slot {assignedSlot} for {roomCode}.", this);
+
+            BeginJoinRoomInternal(roomCode, assignedSlot, displayName, true);
         });
 #endif
     }
@@ -412,6 +431,11 @@ public sealed class FirebaseMultiplayerClient : MonoBehaviour
 
         CacheLocalReferences();
 
+        if (localPlayerTransform == null)
+        {
+            return;
+        }
+
         if (!TryBuildPlayerState(out FirebasePlayerState playerState))
         {
             return;
@@ -429,6 +453,10 @@ public sealed class FirebaseMultiplayerClient : MonoBehaviour
         playerRef.Child("displayName").SetValueAsync(playerState.displayName);
         playerRef.Child("x").SetValueAsync(playerState.x);
         playerRef.Child("y").SetValueAsync(playerState.y);
+        playerRef.Child("z").SetValueAsync(localPlayerTransform.position.z);
+        playerRef.Child("position").Child("x").SetValueAsync(localPlayerTransform.position.x);
+        playerRef.Child("position").Child("y").SetValueAsync(localPlayerTransform.position.y);
+        playerRef.Child("position").Child("z").SetValueAsync(localPlayerTransform.position.z);
         playerRef.Child("alive").SetValueAsync(playerState.alive);
         playerRef.Child("infected").SetValueAsync(playerState.infected);
         playerRef.Child("aiControlled").SetValueAsync(playerState.aiControlled);
@@ -436,7 +464,11 @@ public sealed class FirebaseMultiplayerClient : MonoBehaviour
 
         WriteLocalLobbyPlayerData();
 
-        Debug.Log("[FIREBASE] Published local player state.", this);
+        if (Time.unscaledTime >= nextPositionLogTime)
+        {
+            nextPositionLogTime = Time.unscaledTime + 0.5f;
+            Debug.Log($"[FIREBASE] Published local position for {playerKey}", this);
+        }
 #endif
     }
 
@@ -678,6 +710,8 @@ public sealed class FirebaseMultiplayerClient : MonoBehaviour
             return;
         }
 
+        EnsureFirebaseRootReference();
+
         if (rootRef == null)
         {
             return;
@@ -687,6 +721,29 @@ public sealed class FirebaseMultiplayerClient : MonoBehaviour
         metaRef = roomRootRef.Child("meta");
         playersRef = roomRootRef.Child("players");
         stateRef = roomRootRef.Child("state");
+    }
+
+    void EnsureFirebaseRootReference()
+    {
+        if (database == null)
+        {
+            if (app == null)
+            {
+                app = FirebaseApp.DefaultInstance;
+            }
+
+            if (app != null)
+            {
+                database = !string.IsNullOrWhiteSpace(databaseUrl)
+                    ? FirebaseDatabase.GetInstance(app, databaseUrl)
+                    : FirebaseDatabase.DefaultInstance;
+            }
+        }
+
+        if (rootRef == null && database != null)
+        {
+            rootRef = database.RootReference;
+        }
     }
 
     void AttachFirebaseListeners()
@@ -717,6 +774,7 @@ public sealed class FirebaseMultiplayerClient : MonoBehaviour
             string player = pendingPlayerId;
             pendingCreateRoom = false;
             pendingJoinRoom = false;
+            pendingAutoJoinRoom = false;
             if (!string.IsNullOrWhiteSpace(player))
             {
                 localPlayerId = player;
@@ -726,12 +784,26 @@ public sealed class FirebaseMultiplayerClient : MonoBehaviour
             return;
         }
 
+        if (pendingAutoJoinRoom)
+        {
+            string code = pendingRoomCode;
+            string requestedName = pendingRequestedDisplayName;
+            pendingCreateRoom = false;
+            pendingJoinRoom = false;
+            pendingAutoJoinRoom = false;
+            pendingRequestedDisplayName = null;
+            Debug.Log("[FIREBASE] Processing queued JoinRoomAuto. room=" + code, this);
+            JoinRoomAuto(code, requestedName);
+            return;
+        }
+
         if (pendingJoinRoom)
         {
             string code = pendingRoomCode;
             string player = pendingPlayerId;
             pendingCreateRoom = false;
             pendingJoinRoom = false;
+            pendingAutoJoinRoom = false;
             if (!string.IsNullOrWhiteSpace(player))
             {
                 localPlayerId = player;
@@ -821,7 +893,82 @@ public sealed class FirebaseMultiplayerClient : MonoBehaviour
         });
     }
 
-    void FinalizeJoinRoom(bool roomAlreadyStarted)
+    void BeginJoinRoomInternal(string code, string playerId, string requestedDisplayName, bool autoAssigned)
+    {
+        roomCode = NormalizeRoomCode(code);
+        localPlayerId = NormalizeFirebasePlayerId(playerId);
+        displayName = NormalizeDisplayName(requestedDisplayName, localPlayerId);
+        localReady = false;
+        matchStartEventRaised = false;
+        matchHasStartedLocally = false;
+
+        CacheLocalReferences();
+
+        if (!enableFirebase)
+        {
+            LogFallback();
+            return;
+        }
+
+        if (!initialized)
+        {
+            if (autoAssigned)
+            {
+                pendingAutoJoinRoom = true;
+                pendingJoinRoom = false;
+                pendingCreateRoom = false;
+                pendingRoomCode = roomCode;
+                pendingRequestedDisplayName = requestedDisplayName;
+            }
+            else
+            {
+                pendingJoinRoom = true;
+                pendingCreateRoom = false;
+                pendingAutoJoinRoom = false;
+                pendingRoomCode = roomCode;
+                pendingPlayerId = localPlayerId;
+            }
+
+            Debug.Log($"[FIREBASE] Join request queued until Firebase ready. room={roomCode} player={localPlayerId}", this);
+            return;
+        }
+
+        if (!TryEnableFirebaseSession())
+        {
+            LogFallback();
+            return;
+        }
+
+#if FIREBASE_ENABLED
+        if (rootRef == null)
+        {
+            return;
+        }
+
+        SetupFirebaseRoomReferences();
+
+        if (stateRef == null)
+        {
+            FinalizeJoinRoom(false, autoAssigned);
+            return;
+        }
+
+        stateRef.GetValueAsync().ContinueWithOnMainThread(task =>
+        {
+            bool roomAlreadyStarted = false;
+
+            if (!task.IsFaulted && !task.IsCanceled && task.Result != null && task.Result.Exists)
+            {
+                FirebaseMatchState existingState = DeserializeMatchState(task.Result);
+                roomAlreadyStarted = IsMatchStartedState(existingState);
+            }
+
+            FinalizeJoinRoom(roomAlreadyStarted, autoAssigned);
+        });
+#endif
+    }
+
+    void FinalizeJoinRoom(bool roomAlreadyStarted, bool autoAssigned)
     {
         joined = true;
         IsHost = false;
@@ -837,12 +984,97 @@ public sealed class FirebaseMultiplayerClient : MonoBehaviour
         EmitLocalLobbyPlayersChanged();
         OnRoomJoined?.Invoke(roomCode);
 
+        if (autoAssigned)
+        {
+            Debug.Log($"[4P TEST] Local client joined as {localPlayerId} displayName={displayName} host={IsHost}", this);
+        }
+
         if (roomAlreadyStarted)
         {
             CheckCurrentMatchStateOnce();
         }
 
         Debug.Log($"[FIREBASE] Joined room {roomCode} as {localPlayerId}.", this);
+    }
+
+    void FinalizeCreateRoom()
+    {
+        IsHost = true;
+        joined = true;
+        cachedWinner = string.Empty;
+        cachedFinalHuntActive = false;
+        pendingJoinRoom = false;
+        pendingAutoJoinRoom = false;
+        pendingCreateRoom = false;
+        pendingRequestedDisplayName = null;
+
+        SetupFirebaseRoomReferences();
+        WriteRoomMeta(true);
+        WriteLobbyState();
+        AttachFirebaseListeners();
+        PublishLocalPlayerState();
+        EmitLocalLobbyPlayersChanged();
+        OnRoomJoined?.Invoke(roomCode);
+
+        Debug.Log($"[FIREBASE] Room reset for fresh create: {roomCode}", this);
+        Debug.Log($"[FIREBASE] Room created {roomCode} host={localPlayerId}", this);
+        Debug.Log($"[FIREBASE] Joined room {roomCode} as {localPlayerId}.", this);
+    }
+
+    string ChooseAutoJoinSlot(DataSnapshot playersSnapshot)
+    {
+        HashSet<string> occupiedSlots = new HashSet<string>(StringComparer.Ordinal);
+
+        if (playersSnapshot != null)
+        {
+            foreach (DataSnapshot child in playersSnapshot.Children)
+            {
+                string playerId = GetSnapshotString(child, "playerId", child.Key);
+                playerId = NormalizeFirebasePlayerId(playerId);
+                if (!string.IsNullOrWhiteSpace(playerId))
+                {
+                    occupiedSlots.Add(playerId);
+                }
+            }
+        }
+
+        string[] preferredSlots = { "player_2", "player_3", "player_4" };
+        for (int i = 0; i < preferredSlots.Length; i++)
+        {
+            if (!occupiedSlots.Contains(preferredSlots[i]))
+            {
+                return preferredSlots[i];
+            }
+        }
+
+        return null;
+    }
+
+    static string ResolveAutoJoinDisplayName(string slotId, string requestedDisplayName)
+    {
+        if (!string.IsNullOrWhiteSpace(requestedDisplayName))
+        {
+            return requestedDisplayName.Trim();
+        }
+
+        switch (NormalizeFirebasePlayerId(slotId))
+        {
+            case "player_2": return "Player 2";
+            case "player_3": return "Player 3";
+            case "player_4": return "Player 4";
+            default: return "Player";
+        }
+    }
+
+    void ReportRoomError(string message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return;
+        }
+
+        Debug.LogWarning(message, this);
+        OnRoomError?.Invoke(message);
     }
 
     static bool IsMatchStartedState(FirebaseMatchState state)
@@ -1517,6 +1749,54 @@ public sealed class FirebaseMultiplayerClient : MonoBehaviour
     {
         roomCode = NormalizeRoomCode(code);
     }
+
+#if UNITY_EDITOR
+    [ContextMenu("Debug Fill Lobby 4 Players")]
+    public void DebugFillLobby4Players()
+    {
+        if (!IsOnline)
+        {
+            Debug.LogWarning("[FIREBASE] Debug fill skipped: Firebase is not ready.", this);
+            return;
+        }
+
+#if FIREBASE_ENABLED
+        if (playersRef == null)
+        {
+            SetupFirebaseRoomReferences();
+        }
+
+        if (playersRef == null)
+        {
+            Debug.LogWarning("[FIREBASE] Debug fill skipped: playersRef unavailable.", this);
+            return;
+        }
+
+        WriteDebugLobbyPlayer("player_2", "Player 2");
+        WriteDebugLobbyPlayer("player_3", "Player 3");
+        WriteDebugLobbyPlayer("player_4", "Player 4");
+        Debug.Log("[4P TEST] Debug filled lobby slots player_2-player_4.", this);
+#endif
+    }
+
+    void WriteDebugLobbyPlayer(string playerId, string playerName)
+    {
+        string slotId = NormalizeFirebasePlayerId(playerId);
+        DatabaseReference playerRef = playersRef.Child(slotId);
+        playerRef.Child("playerId").SetValueAsync(slotId);
+        playerRef.Child("displayName").SetValueAsync(playerName);
+        playerRef.Child("isHost").SetValueAsync(false);
+        playerRef.Child("isReady").SetValueAsync(false);
+        playerRef.Child("isAlive").SetValueAsync(true);
+        playerRef.Child("isBot").SetValueAsync(false);
+        playerRef.Child("x").SetValueAsync(0f);
+        playerRef.Child("y").SetValueAsync(0f);
+        playerRef.Child("z").SetValueAsync(0f);
+        playerRef.Child("position").Child("x").SetValueAsync(0f);
+        playerRef.Child("position").Child("y").SetValueAsync(0f);
+        playerRef.Child("position").Child("z").SetValueAsync(0f);
+    }
+#endif
 
     static string GetDisplayName(PlayerIdentity player)
     {

@@ -411,6 +411,7 @@ public sealed class GameFlowManager : MonoBehaviour
         firebaseClient.OnRoomJoined += HandleRoomJoined;
         firebaseClient.OnRoomLeft += HandleRoomLeft;
         firebaseClient.OnMatchStartedFromFirebase += HandleMatchStartedFromFirebase;
+        firebaseClient.OnRoomError += HandleRoomError;
         firebaseEventsSubscribed = true;
     }
 
@@ -426,6 +427,7 @@ public sealed class GameFlowManager : MonoBehaviour
         firebaseClient.OnRoomJoined -= HandleRoomJoined;
         firebaseClient.OnRoomLeft -= HandleRoomLeft;
         firebaseClient.OnMatchStartedFromFirebase -= HandleMatchStartedFromFirebase;
+        firebaseClient.OnRoomError -= HandleRoomError;
         firebaseEventsSubscribed = false;
     }
 
@@ -969,7 +971,6 @@ public sealed class GameFlowManager : MonoBehaviour
     {
         RefreshSceneReferences();
         SubscribeFirebaseEvents();
-        PushCurrentIdentityToFirebase();
         localReady = false;
         UpdateReadyButtonLabel();
         ShowLobby("Creating room...");
@@ -986,17 +987,16 @@ public sealed class GameFlowManager : MonoBehaviour
     {
         RefreshSceneReferences();
         SubscribeFirebaseEvents();
-        PushCurrentIdentityToFirebase();
         localReady = false;
         UpdateReadyButtonLabel();
         ShowLobby("Joining room...");
 
         if (firebaseClient != null)
         {
-            firebaseClient.JoinRoom(defaultRoomCode, defaultPlayerId);
+            firebaseClient.JoinRoomAuto(defaultRoomCode, defaultPlayerName);
         }
 
-        if (debugLogs) Debug.Log($"[FLOW] Join room requested: {defaultRoomCode} {defaultPlayerId}");
+        if (debugLogs) Debug.Log($"[FLOW] Join room requested: {defaultRoomCode} auto-slot requestedName={defaultPlayerName}");
     }
 
     public void ShowLobby()
@@ -1126,6 +1126,8 @@ public sealed class GameFlowManager : MonoBehaviour
         // Hide Team A entry screens
         HideTeamAEntryScreens();
 
+        SnapLocalPlayerToSlot();
+
         if (lobbyPanel != null)
         {
             lobbyPanel.SetActive(false);
@@ -1140,6 +1142,16 @@ public sealed class GameFlowManager : MonoBehaviour
 
         SetGameplayActive(true);
         RestoreGameplayHudForMatch();
+
+        if (firebaseClient != null)
+        {
+            firebaseClient.PublishLocalPlayerState();
+        }
+
+        if (firebaseClient != null)
+        {
+            Debug.Log($"[4P TEST] Entered InGame as {firebaseClient.LocalPlayerId}");
+        }
 
         if (debugLogs) Debug.Log("[FLOW UI] Entry UI hidden for match.");
     }
@@ -1174,6 +1186,22 @@ public sealed class GameFlowManager : MonoBehaviour
         UpdateLobbyButtons();
     }
 
+    void HandleRoomError(string message)
+    {
+        if (debugLogs)
+        {
+            Debug.LogWarning($"[FLOW] Room error: {message}");
+        }
+
+        if (createJoinRoomInstance != null)
+        {
+            createJoinRoomInstance.SetLoading(false);
+            createJoinRoomInstance.SetError(message);
+        }
+
+        SetLobbyStatus(message);
+    }
+
     void HandleLobbyPlayersChanged(List<LobbyPlayerData> players)
     {
         UpdateLobbyPlayersDisplay(players);
@@ -1189,6 +1217,129 @@ public sealed class GameFlowManager : MonoBehaviour
     {
         if (debugLogs) Debug.Log($"[FLOW] Match start received from Firebase. phase={phase}");
         StartInGame();
+    }
+
+    string BuildLobbySlotDisplay(List<LobbyPlayerData> players, out int connectedCount)
+    {
+        connectedCount = 0;
+
+        Dictionary<string, LobbyPlayerData> playerMap = new Dictionary<string, LobbyPlayerData>(StringComparer.OrdinalIgnoreCase);
+        if (players != null)
+        {
+            for (int i = 0; i < players.Count; i++)
+            {
+                LobbyPlayerData player = players[i];
+                if (player == null || string.IsNullOrWhiteSpace(player.playerId))
+                {
+                    continue;
+                }
+
+                playerMap[player.playerId] = player;
+            }
+        }
+
+        string[] slotIds = new[] { "player_1", "player_2", "player_3", "player_4" };
+        List<string> lines = new List<string>(4);
+
+        for (int index = 0; index < slotIds.Length; index++)
+        {
+            string slotId = slotIds[index];
+            string slotLabel = GetSlotLabel(slotId);
+            string displayName = slotLabel;
+            string readyState = "WAITING FOR SURVIVOR";
+
+            if (playerMap.TryGetValue(slotId, out LobbyPlayerData player) && player != null)
+            {
+                connectedCount++;
+                displayName = string.IsNullOrWhiteSpace(player.displayName) ? slotLabel : player.displayName;
+                readyState = player.isReady ? "READY" : "WAITING";
+            }
+
+            if (slotId == "player_1")
+            {
+                lines.Add($"HOST {displayName} - {readyState}");
+            }
+            else
+            {
+                lines.Add($"{displayName} - {readyState}");
+            }
+        }
+
+        if (players != null && players.Count > 4)
+        {
+            Debug.LogWarning($"[FLOW] Stale lobby data detected. count={players.Count}");
+        }
+
+        return string.Join("\n", lines);
+    }
+
+    string BuildLobbySlotDebugString(List<LobbyPlayerData> players)
+    {
+        Dictionary<string, LobbyPlayerData> playerMap = new Dictionary<string, LobbyPlayerData>(StringComparer.OrdinalIgnoreCase);
+        if (players != null)
+        {
+            for (int i = 0; i < players.Count; i++)
+            {
+                LobbyPlayerData player = players[i];
+                if (player == null || string.IsNullOrWhiteSpace(player.playerId))
+                {
+                    continue;
+                }
+
+                playerMap[player.playerId] = player;
+            }
+        }
+
+        string[] slotIds = new[] { "player_1", "player_2", "player_3", "player_4" };
+        List<string> parts = new List<string>(4);
+        for (int i = 0; i < slotIds.Length; i++)
+        {
+            string slotId = slotIds[i];
+            parts.Add($"{slotId}={(playerMap.ContainsKey(slotId) ? "connected" : "empty")}");
+        }
+
+        return string.Join(" ", parts);
+    }
+
+    string GetSlotLabel(string slotId)
+    {
+        switch (slotId)
+        {
+            case "player_1": return "Player 1";
+            case "player_2": return "Player 2";
+            case "player_3": return "Player 3";
+            case "player_4": return "Player 4";
+            default: return slotId;
+        }
+    }
+
+    void SnapLocalPlayerToSlot()
+    {
+        if (firebaseClient == null || localPlayerMovement == null)
+        {
+            return;
+        }
+
+        Transform playerTransform = localPlayerMovement.transform;
+        if (playerTransform == null)
+        {
+            return;
+        }
+
+        if (!PlayerSlotSpawnManager.TryGetSpawnPosition(firebaseClient.LocalPlayerId, out Vector3 spawnPosition))
+        {
+            return;
+        }
+
+        Rigidbody2D rb2D = localPlayerMovement.GetComponent<Rigidbody2D>();
+        if (rb2D != null)
+        {
+            rb2D.linearVelocity = Vector2.zero;
+            rb2D.position = spawnPosition;
+        }
+
+        playerTransform.position = spawnPosition;
+        Debug.Log($"[SPAWN] Local player {firebaseClient.LocalPlayerId} spawned at ({spawnPosition.x},{spawnPosition.y},{spawnPosition.z})");
     }
 
     void SetLobbyRoomCode(string roomCode)
@@ -1208,31 +1359,24 @@ public sealed class GameFlowManager : MonoBehaviour
         if (lobbyPlayerListText == null) return;
         if (players == null)
         {
-            lobbyPlayerListText.text = localReady ? "READY" : "WAITING";
-            UpdateLobbyStatusFromPlayers(0);
+            lobbyPlayerListText.text = BuildLobbySlotDisplay(null, out int emptyCount);
+            UpdateLobbyStatusFromPlayers(emptyCount);
             return;
         }
 
-        List<string> lines = new List<string>();
-        for (int index = 0; index < players.Count; index++)
-        {
-            LobbyPlayerData player = players[index];
-            if (player == null) continue;
-            string name = string.IsNullOrWhiteSpace(player.displayName) ? player.playerId : player.displayName;
-            string role = player.isHost ? "HOST " : string.Empty;
-            string readyState = player.isReady ? "READY" : "WAITING";
-            string botState = player.isBot ? " BOT" : string.Empty;
-            lines.Add($"{role}{name}{botState} - {readyState}");
-        }
+        lobbyPlayerListText.text = BuildLobbySlotDisplay(players, out int connectedCount);
+        UpdateLobbyStatusFromPlayers(connectedCount);
 
-        lobbyPlayerListText.text = lines.Count > 0 ? string.Join("\n", lines) : "No players yet";
-        UpdateLobbyStatusFromPlayers(players.Count);
+        if (debugLogs)
+        {
+            Debug.Log($"[4P TEST] Lobby slots: {BuildLobbySlotDebugString(players)}");
+        }
     }
 
     void UpdateLobbyStatusFromPlayers(int playerCount)
     {
         if (lobbyStatusText != null)
-            lobbyStatusText.text = $"WAITING FOR SURVIVORS ({playerCount}/4)";
+            lobbyStatusText.text = $"WAITING FOR SURVIVORS ({Mathf.Min(playerCount, 4)}/4)";
     }
 
     void UpdateReadyButtonLabel()
@@ -1264,6 +1408,11 @@ public sealed class GameFlowManager : MonoBehaviour
         if (debugLogs)
         {
             Debug.Log($"[FLOW] Lobby host status localIsHost={localIsHost} startButtonInteractable={canHostStart}");
+        }
+
+        if (firebaseReady && !localIsHost)
+        {
+            SetLobbyStatus("WAITING FOR HOST TO START");
         }
     }
 
