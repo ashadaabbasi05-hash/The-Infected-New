@@ -27,6 +27,7 @@ public sealed class GameFlowManager : MonoBehaviour
 
     [SerializeField] public bool usePlaceholderUi = true;
     [SerializeField] public bool useTeamAEntryUi = true;
+    [SerializeField] public bool showDevClientSwitcher = true;
     [SerializeField] public bool disableGameplayUntilMatchStart = true;
     [SerializeField] public bool debugLogs = true;
     [SerializeField] public string defaultRoomCode = "ROOM123";
@@ -60,6 +61,10 @@ public sealed class GameFlowManager : MonoBehaviour
     [SerializeField] TMP_Text readyButtonLabel;
     [SerializeField] TMP_Text startMatchButtonLabel;
     [SerializeField] TMP_Text leaveButtonLabel;
+
+    [Header("Dev Client Switcher")]
+    [SerializeField] GameObject devClientSwitcherRoot;
+    [SerializeField] TMP_Text devClientSwitcherStatusText;
 
     // Instance references for Team A UI
     MainMenuUI mainMenuInstance;
@@ -109,6 +114,11 @@ public sealed class GameFlowManager : MonoBehaviour
         RefreshSceneReferences();
         ApplyClientConfigIfAvailable();
 
+        if (showDevClientSwitcher)
+        {
+            EnsureDevClientSwitcherPanel();
+        }
+
         if (usePlaceholderUi && !ShouldUseTeamAEntry())
         {
             EnsureGameFlowCanvas();
@@ -122,6 +132,10 @@ public sealed class GameFlowManager : MonoBehaviour
     {
         RefreshSceneReferences();
         ApplyClientConfigIfAvailable();
+        if (showDevClientSwitcher)
+        {
+            EnsureDevClientSwitcherPanel();
+        }
         SubscribeFirebaseEvents();
     }
 
@@ -240,6 +254,8 @@ public sealed class GameFlowManager : MonoBehaviour
             createJoinRoomInstance.SetPlayerName(defaultPlayerName);
             createJoinRoomInstance.SetRoomCode(defaultRoomCode);
         }
+
+        RefreshDevClientSwitcherStatus();
     }
 
     void PushCurrentIdentityToFirebase()
@@ -257,6 +273,131 @@ public sealed class GameFlowManager : MonoBehaviour
         firebaseClient.SetLocalPlayerId(defaultPlayerId);
         firebaseClient.SetDisplayName(defaultPlayerName);
         firebaseClient.SetRoomCode(defaultRoomCode);
+        RefreshDevClientSwitcherStatus();
+    }
+
+    void EnsureDevClientSwitcherPanel()
+    {
+        if (!showDevClientSwitcher)
+        {
+            return;
+        }
+
+        if (devClientSwitcherRoot != null)
+        {
+            RefreshDevClientSwitcherStatus();
+            return;
+        }
+
+        GameObject canvasObject = new GameObject("DevClientSwitcherCanvas");
+        Canvas canvas = canvasObject.AddComponent<Canvas>();
+        canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+        canvas.sortingOrder = 250;
+        canvasObject.AddComponent<CanvasScaler>();
+        canvasObject.AddComponent<GraphicRaycaster>();
+
+        GameObject panel = new GameObject("DevClientSwitcherPanel");
+        panel.transform.SetParent(canvasObject.transform, false);
+        RectTransform panelRect = panel.AddComponent<RectTransform>();
+        panelRect.anchorMin = new Vector2(1f, 1f);
+        panelRect.anchorMax = new Vector2(1f, 1f);
+        panelRect.pivot = new Vector2(1f, 1f);
+        panelRect.anchoredPosition = new Vector2(-24f, -24f);
+        panelRect.sizeDelta = new Vector2(360f, 260f);
+
+        Image background = panel.AddComponent<Image>();
+        background.color = new Color32(11, 22, 28, 235);
+
+        VerticalLayoutGroup layout = panel.AddComponent<VerticalLayoutGroup>();
+        layout.padding = new RectOffset(16, 16, 16, 16);
+        layout.spacing = 10f;
+        layout.childAlignment = TextAnchor.UpperCenter;
+        layout.childControlHeight = true;
+        layout.childControlWidth = true;
+        layout.childForceExpandHeight = false;
+        layout.childForceExpandWidth = true;
+
+        ContentSizeFitter fitter = panel.AddComponent<ContentSizeFitter>();
+        fitter.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
+        fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+
+        TMP_Text title = CreateText(panel.transform, "DEV CLIENT SWITCHER", 28, TextAlignmentOptions.Center, true, new Color32(242, 253, 255, 255));
+        title.rectTransform.sizeDelta = new Vector2(320f, 50f);
+
+        devClientSwitcherStatusText = CreateText(panel.transform, string.Empty, 18, TextAlignmentOptions.Center, false, new Color32(169, 216, 221, 255));
+        devClientSwitcherStatusText.rectTransform.sizeDelta = new Vector2(320f, 72f);
+
+        CreateButton(panel.transform, "PLAYER 1 HOST", new Color32(22, 65, 74, 255), UsePlayer1HostPreset);
+        CreateButton(panel.transform, "PLAYER 2 CLIENT", new Color32(18, 50, 58, 255), UsePlayer2ClientPreset);
+        CreateButton(panel.transform, "APPLY TO GAME", new Color32(255, 90, 95, 255), ApplyDevClientPreset);
+
+        devClientSwitcherRoot = canvasObject;
+        RefreshDevClientSwitcherStatus();
+    }
+
+    void RefreshDevClientSwitcherStatus()
+    {
+        if (devClientSwitcherStatusText == null)
+        {
+            return;
+        }
+
+        string configName = clientConfig != null ? clientConfig.LocalPlayerId : defaultPlayerId;
+        string configDisplay = clientConfig != null ? clientConfig.DisplayName : defaultPlayerName;
+        string configRoom = clientConfig != null ? clientConfig.RoomCode : defaultRoomCode;
+        bool host = clientConfig != null ? clientConfig.IsHostClient : string.Equals(defaultPlayerId, "player_1", StringComparison.OrdinalIgnoreCase);
+
+        devClientSwitcherStatusText.text =
+            $"Current: {configName}\n" +
+            $"Name: {configDisplay}\n" +
+            $"Room: {configRoom}\n" +
+            $"Mode: {(host ? "Host" : "Client")}";
+    }
+
+    void UsePlayer1HostPreset()
+    {
+        if (clientConfig != null)
+        {
+            clientConfig.UsePlayer1Host();
+        }
+
+        defaultPlayerId = "player_1";
+        defaultPlayerName = "Player 1";
+        defaultRoomCode = "ROOM123";
+
+        ApplyClientConfigIfAvailable();
+        PushCurrentIdentityToFirebase();
+    }
+
+    void UsePlayer2ClientPreset()
+    {
+        if (clientConfig != null)
+        {
+            clientConfig.UsePlayer2Client();
+        }
+
+        defaultPlayerId = "player_2";
+        defaultPlayerName = "Player 2";
+        defaultRoomCode = "ROOM123";
+
+        ApplyClientConfigIfAvailable();
+        PushCurrentIdentityToFirebase();
+    }
+
+    void ApplyDevClientPreset()
+    {
+        if (clientConfig != null)
+        {
+            clientConfig.ApplyToFirebaseAndFlow();
+        }
+
+        ApplyClientConfigIfAvailable();
+        PushCurrentIdentityToFirebase();
+
+        if (debugLogs)
+        {
+            Debug.Log($"[FLOW] Dev client preset applied: {defaultPlayerId} / {defaultPlayerName} / {defaultRoomCode}");
+        }
     }
 
     void SubscribeFirebaseEvents()
